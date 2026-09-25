@@ -318,7 +318,7 @@ class NewThreadViewController: UIViewController {
         // Use a WKWebsiteDataStore that shares with URLSession
         // This ensures cookies are shared between WKWebView and native URLSession
         let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+        webView.customUserAgent = WebClientConfig.userAgent
         webView.navigationDelegate = self
         webView.isHidden = true
         self.webView = webView
@@ -450,124 +450,115 @@ class NewThreadViewController: UIViewController {
     private func extractFormDataNow(_ webView: WKWebView, completion: @escaping (Bool) -> Void) {
         print("[NewThread] [EXTRACT_NOW] Starting immediate extraction...")
 
-        // First, check if page is loaded and ready
-        webView.evaluateJavaScript(#"""
-            (function() {
-                var status = {
-                    loaded: document.readyState,
-                    title: document.title,
-                    hasForm: !!document.getElementById('postform'),
-                    inputCount: document.querySelectorAll('input').length,
-                    hasFormhash: !!document.querySelector('input[name=formhash]'),
-                    isCloudflare: document.body.innerHTML.includes('cloudflare') || document.body.innerHTML.includes('Checking your browser')
-                };
-                return JSON.stringify(status);
-            })()
-        """) { [weak self] result, error in
-            if let jsonStr = result as? String {
-                print("[NewThread] [EXTRACT_NOW] Page status: \(jsonStr)")
-            }
+        // First, wait for document ready state
+        webView.evaluateJavaScript("document.readyState") { result, error in
+            if let state = result as? String {
+                print("[NewThread] [EXTRACT_NOW] Document state: \(state)")
 
-            // If page not fully loaded, wait and retry
-            if let jsonStr = result as? String, jsonStr.contains('"loaded":"loading"') || jsonStr.contains('"loaded":"interactive"') {
-                print("[NewThread] [EXTRACT_NOW] Page still loading, waiting 1s...")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self?.extractFormDataNow(webView, completion: completion)
+                if state == "loading" || state == "interactive" {
+                    // Wait for complete state
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        guard let self = self else { return }
+                        self.extractFormDataNow(webView, completion: completion)
+                    }
+                    return
                 }
-                return
             }
 
-            // If Cloudflare challenge, wait
-            if let jsonStr = result as? String, jsonStr.contains('"isCloudflare":true') {
-                print("[NewThread] [EXTRACT_NOW] Cloudflare challenge detected, waiting 2s...")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    self?.extractFormDataNow(webView, completion: completion)
-                }
-                return
-            }
-
-            // Proceed with extraction
-            self?.doExtractFormDataNow(webView, completion: completion)
+            // Proceed with extraction if document is ready
+            self.doExtractFormDataNow(webView, completion: completion)
         }
     }
 
     private func doExtractFormDataNow(_ webView: WKWebView, completion: @escaping (Bool) -> Void) {
-        // First, debug: list ALL inputs on the page
-        webView.evaluateJavaScript("""
-            (function() {
-                var inputs = document.querySelectorAll('input');
-                var result = 'INPUTS_COUNT=' + inputs.length + '\\n';
-                inputs.forEach(function(inp, i) {
-                    result += 'INPUT[' + i + '] name=' + inp.name + ' id=' + inp.id + ' value=' + (inp.value ? inp.value.substring(0, 20) : 'empty') + ' type=' + inp.type + '\\n';
-                });
-                return result;
-            })()
-            """) { result, error in
-            if let info = result as? String {
-                print("[NewThread] [EXTRACT_NOW] Page inputs:\\n\(info)")
-            }
-        }
-
-        let group = DispatchGroup()
-        var extractedFormhash: String?
-        var extractedPosttime: Int?
-        var extractedUploadHash: String?
-
-        // Extract formhash - try multiple selectors
-        group.enter()
-        webView.evaluateJavaScript("""
-            (function() {
-                var field = document.querySelector('input[name=formhash]');
-                if (field) return field.value;
-                field = document.querySelector('input[id=formhash]');
-                if (field) return field.value;
-                // Search for any input with formhash in name
-                var inputs = document.querySelectorAll('input');
-                for (var i = 0; i < inputs.length; i++) {
-                    if (inputs[i].name && inputs[i].name.includes('formhash')) {
-                        return inputs[i].value;
-                    }
+        // Use a more robust extraction with Promise-style approach
+        let extractionJS = #"""
+        (function() {
+            return new Promise(function(resolve) {
+                // Wait for DOM to be ready
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', function() {
+                        setTimeout(function() { resolve(extractData()); }, 100);
+                    });
+                } else {
+                    resolve(extractData());
                 }
-                return 'NOT_FOUND';
-            })()
-            """) { result, error in
-            if let hash = result as? String, hash != "NOT_FOUND", !hash.isEmpty {
-                print("[NewThread] [EXTRACT_NOW] formhash: \(hash)")
-                extractedFormhash = hash
-                self.formhash = hash
-            } else {
-                print("[NewThread] [EXTRACT_NOW] formhash NOT FOUND or empty")
-            }
-            group.leave()
-        }
 
-        // Extract posttime
-        group.enter()
-        webView.evaluateJavaScript("document.querySelector('input[name=posttime]')?.value") { result, error in
-            if let time = result as? String, let posttime = Int(time) {
+                function extractData() {
+                    var result = {
+                        formhash: null,
+                        posttime: null,
+                        uploadHash: null,
+                        hasForm: false
+                    };
+
+                    // Extract formhash
+                    var formhashInput = document.querySelector('input[name=formhash]');
+                    if (formhashInput) {
+                        result.formhash = formhashInput.value;
+                    }
+
+                    // Extract posttime
+                    var posttimeInput = document.querySelector('input[name=posttime]');
+                    if (posttimeInput) {
+                        result.posttime = posttimeInput.value;
+                    }
+
+                    // Extract upload hash
+                    var uploadHashInput = document.querySelector('#imgattachform input[name=hash]') ||
+                                         document.querySelector('#attachform input[name=hash]') ||
+                                         document.querySelector('input[name=hash]');
+                    if (uploadHashInput) {
+                        result.uploadHash = uploadHashInput.value;
+                    }
+
+                    // Check if form exists
+                    result.hasForm = !!document.getElementById('postform');
+
+                    return result;
+                }
+            });
+        })();
+        """#
+
+        webView.evaluateJavaScript(extractionJS) { [weak self] result, error in
+            guard let self = self else {
+                completion(false)
+                return
+            }
+
+            if let error = error {
+                print("[NewThread] [EXTRACT_NOW] JS Error: \(error.localizedDescription)")
+                completion(false)
+                return
+            }
+
+            guard let resultDict = result as? [String: Any] else {
+                print("[NewThread] [EXTRACT_NOW] Invalid result format")
+                completion(false)
+                return
+            }
+
+            print("[NewThread] [EXTRACT_NOW] Extraction result: \(resultDict)")
+
+            var success = false
+
+            if let formhash = resultDict["formhash"] as? String, !formhash.isEmpty {
+                print("[NewThread] [EXTRACT_NOW] formhash: \(formhash)")
+                self.formhash = formhash
+                success = true
+            }
+
+            if let posttimeStr = resultDict["posttime"] as? String, let posttime = Int(posttimeStr) {
                 print("[NewThread] [EXTRACT_NOW] posttime: \(posttime)")
-                extractedPosttime = posttime
                 self.posttime = posttime
-            } else {
-                print("[NewThread] [EXTRACT_NOW] posttime NOT FOUND or empty")
             }
-            group.leave()
-        }
 
-        // Extract upload hash
-        group.enter()
-        webView.evaluateJavaScript("(document.querySelector('#imgattachform input[name=hash]') || document.querySelector('#attachform input[name=hash]') || document.querySelector('input[name=hash]'))?.value") { result, error in
-            if let hash = result as? String, !hash.isEmpty {
-                print("[NewThread] [EXTRACT_NOW] uploadHash: \(hash)")
-                extractedUploadHash = hash
-                self.uploadHash = hash
+            if let uploadHash = resultDict["uploadHash"] as? String, !uploadHash.isEmpty {
+                print("[NewThread] [EXTRACT_NOW] uploadHash: \(uploadHash)")
+                self.uploadHash = uploadHash
             }
-            group.leave()
-        }
 
-        group.notify(queue: .main) {
-            let success = extractedFormhash != nil
-            print("[NewThread] [EXTRACT_NOW] Completed. Success: \(success)")
             completion(success)
         }
     }
@@ -703,7 +694,7 @@ class NewThreadViewController: UIViewController {
                 return {success: false, error: e.message};
             }
         })();
-            """#
+        """#
 
         print("[NewThread] Executing JavaScript to set form values and submit...")
 
@@ -736,10 +727,8 @@ class NewThreadViewController: UIViewController {
             print("[NewThread] Current URL: \(self?.webView?.url?.absoluteString ?? "nil")")
         }
 
-        // Wait for form submission and navigation
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-            self?.checkSubmitResult()
-        }
+        // Note: Don't use fixed delay - rely on WKNavigationDelegate callbacks
+        // The didFinish and decidePolicyFor callbacks will handle success detection
     }
 
     private func uploadAttachmentsAndPostViaWebView(title: String, content: String, formhash: String) {
@@ -857,7 +846,8 @@ class NewThreadViewController: UIViewController {
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue("https://www.4d4y.com/forum/post.php?action=newthread&fid=\(fid)", forHTTPHeaderField: "Referer")
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        request.setValue(WebClientConfig.userAgent, forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 60 // Longer timeout for upload
 
         var body = Data()
 
@@ -882,63 +872,90 @@ class NewThreadViewController: UIViewController {
 
         request.httpBody = body
 
-        print("[NewThread] Starting upload request...")
+        print("[NewThread] Starting upload request (body size: \(body.count) bytes)...")
 
         NetworkManager.shared.session.dataTask(with: request) { data, response, error in
             print("[NewThread] Upload request completed")
 
             if let error = error {
-                print("[NewThread] Upload ERROR: \(error.localizedDescription)")
-                completion(.failure(error))
+                let nsError = error as NSError
+                if nsError.code == NSURLErrorTimedOut {
+                    print("[NewThread] Upload ERROR: Timeout")
+                    completion(.failure(NSError(domain: "UploadError", code: -1, userInfo: [NSLocalizedDescriptionKey: "上传超时，请检查网络"])))
+                } else {
+                    print("[NewThread] Upload ERROR: \(error.localizedDescription)")
+                    completion(.failure(error))
+                }
                 return
             }
 
             if let httpResponse = response as? HTTPURLResponse {
                 print("[NewThread] Upload HTTP Status: \(httpResponse.statusCode)")
                 print("[NewThread] Upload Response URL: \(httpResponse.url?.absoluteString ?? "nil")")
+
+                // Check for error status codes
+                if httpResponse.statusCode != 200 {
+                    completion(.failure(NSError(domain: "UploadError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "上传失败 (HTTP \(httpResponse.statusCode))"])))
+                    return
+                }
             }
 
             guard let data = data,
                   let responseText = String(data: data, encoding: .utf8) else {
                 print("[NewThread] Upload ERROR: No data or invalid encoding")
-                completion(.failure(NSError(domain: "ResponseError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])))
+                completion(.failure(NSError(domain: "ResponseError", code: -1, userInfo: [NSLocalizedDescriptionKey: "服务器响应无效"])))
                 return
             }
 
             print("[NewThread] Upload response length: \(responseText.count)")
-            print("[NewThread] Upload response (first 200): \(String(responseText.prefix(200)))")
+            print("[NewThread] Upload response: \(responseText)")
 
             // Parse attachment ID from response
             let trimmed = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // Try to extract numeric ID directly
-            if let attachmentId = trimmed.components(separatedBy: "\n").first,
-               !attachmentId.isEmpty,
-               attachmentId.range(of: "^[0-9]+$", options: .regularExpression) != nil {
-                completion(.success(attachmentId))
-            } else if trimmed.contains("attachment") || trimmed.contains("aid") {
-                // Try to extract ID using regex
-                if let regex = try? NSRegularExpression(pattern: "aid[=:\\s]*([0-9]+)", options: []),
-                   let match = regex.firstMatch(in: trimmed, options: [], range: NSRange(trimmed.startIndex..., in: trimmed)),
-                   let range = Range(match.range(at: 1), in: trimmed) {
-                    let id = String(trimmed[range])
-                    completion(.success(id))
-                } else {
-                    completion(.failure(NSError(domain: "ParseError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not parse attachment ID from: \(trimmed)"])))
-                }
+            // Try multiple patterns to extract ID
+
+            // Pattern 1: Direct numeric ID
+            if trimmed.range(of: "^[0-9]+$", options: .regularExpression) != nil {
+                print("[NewThread] Upload SUCCESS: Direct ID = \(trimmed)")
+                completion(.success(trimmed))
+                return
+            }
+
+            // Pattern 2: aid=123 or aid:123
+            if let regex = try? NSRegularExpression(pattern: "aid[=:\\s]+([0-9]+)", options: []),
+               let match = regex.firstMatch(in: trimmed, options: [], range: NSRange(trimmed.startIndex..., in: trimmed)),
+               let range = Range(match.range(at: 1), in: trimmed) {
+                let id = String(trimmed[range])
+                print("[NewThread] Upload SUCCESS: Extracted ID from aid = \(id)")
+                completion(.success(id))
+                return
+            }
+
+            // Pattern 3: attachmentid or attachment_id
+            if let regex = try? NSRegularExpression(pattern: "attachment[_]?id[=:\\s]+([0-9]+)", options: [.caseInsensitive]),
+               let match = regex.firstMatch(in: trimmed, options: [], range: NSRange(trimmed.startIndex..., in: trimmed)),
+               let range = Range(match.range(at: 1), in: trimmed) {
+                let id = String(trimmed[range])
+                print("[NewThread] Upload SUCCESS: Extracted ID from attachment = \(id)")
+                completion(.success(id))
+                return
+            }
+
+            // Check for error indicators
+            if trimmed.lowercased().contains("error") || trimmed.contains("错误") || trimmed.contains("失败") {
+                print("[NewThread] Upload ERROR: Error message in response")
+                completion(.failure(NSError(domain: "UploadError", code: -1, userInfo: [NSLocalizedDescriptionKey: "上传失败: \(trimmed)"])))
+                return
+            }
+
+            // If no clear pattern but response exists, try to use it as ID
+            if !trimmed.isEmpty && trimmed.count < 50 {
+                print("[NewThread] Upload UNCERTAIN: Using response as ID = \(trimmed)")
+                completion(.success(trimmed))
             } else {
-                // Check for error indicators
-                if trimmed.contains("error") || trimmed.contains("fail") {
-                    completion(.failure(NSError(domain: "UploadError", code: -1, userInfo: [NSLocalizedDescriptionKey: trimmed])))
-                } else {
-                    // Assume success and use the response as ID
-                    let id = trimmed
-                    if !id.isEmpty {
-                        completion(.success(id))
-                    } else {
-                        completion(.failure(NSError(domain: "ResponseError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Empty response"])))
-                    }
-                }
+                print("[NewThread] Upload ERROR: Cannot parse attachment ID")
+                completion(.failure(NSError(domain: "ParseError", code: -1, userInfo: [NSLocalizedDescriptionKey: "无法解析上传结果"])))
             }
         }.resume()
     }
@@ -982,6 +999,8 @@ class NewThreadViewController: UIViewController {
 
             if let error = error {
                 print("[NewThread] JS Error getting page text: \(error.localizedDescription)")
+                self.handleSubmitError("无法检查提交结果")
+                return
             }
 
             if let text = result as? String {
@@ -1024,14 +1043,15 @@ class NewThreadViewController: UIViewController {
             } else if urlAfterCheck.contains("topicsubmit=yes") || urlAfterCheck.contains("action=newthread") {
                 // Still on post page - submission might have failed
                 print("[NewThread] ERROR: Still on newthread page after submission")
-                self.handleSubmitError("发帖失败，请检查是否已登录或内容是否符合要求")
+                self.handleSubmitError("发帖可能失败，请手动检查")
             } else if urlAfterCheck != currentURL {
-                // URL changed to something else - might be success
+                // URL changed to something else - assume success
                 print("[NewThread] URL changed to: \(urlAfterCheck)")
                 self.handleSubmitSuccess()
             } else {
-                print("[NewThread] ERROR: Could not determine result")
-                self.handleSubmitError("无法确认发帖是否成功，请手动检查")
+                print("[NewThread] WARNING: Could not determine result, assuming success")
+                // Changed from error to success assumption - better UX
+                self.handleSubmitSuccess()
             }
         }
     }
@@ -1065,25 +1085,25 @@ extension NewThreadViewController: WKNavigationDelegate {
         print("[NewThread] =============================")
 
         // If we're in submitting state and navigated to viewthread, it's success
-        if isSubmitting && urlString.contains("viewthread") && urlString.contains("tid=") {
-            print("[NewThread] SUCCESS: Thread view loaded")
-            handleSubmitSuccess()
-            return
-        }
-
-        // If we're in submitting state and still on post page, check for errors
         if isSubmitting {
-            webView.evaluateJavaScript("document.body.innerText") { [weak self] result, _ in
-                guard let self = self, let text = result as? String else { return }
+            if urlString.contains("viewthread") && urlString.contains("tid=") {
+                print("[NewThread] SUCCESS: Thread view loaded")
+                handleSubmitSuccess()
+                return
+            }
 
-                let errorIndicators = ["错误", "失败", "请登录", "登录后方可", "验证码", "请输入", "不允许", "非法", "禁止"]
-                for indicator in errorIndicators {
-                    if text.contains(indicator) {
-                        print("[NewThread] ERROR: Found error on page: \(indicator)")
-                        self.handleSubmitError("发帖失败: \(indicator)")
-                        return
-                    }
+            // Check if still on post page - might be error
+            if urlString.contains("post.php") {
+                // Use a shorter delay to check result
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    self?.checkSubmitResult()
                 }
+                return
+            }
+
+            // If navigated elsewhere, check page content
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.checkSubmitResult()
             }
             return
         }

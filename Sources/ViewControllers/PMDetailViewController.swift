@@ -130,7 +130,7 @@ class PMDetailViewController: UIViewController {
         configuration.websiteDataStore = .default()
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+        webView.customUserAgent = WebClientConfig.userAgent
         webView.navigationDelegate = self
         webView.isHidden = true
         self.webView = webView

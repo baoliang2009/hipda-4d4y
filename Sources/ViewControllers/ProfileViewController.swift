@@ -379,13 +379,14 @@ class ProfileViewController: UIViewController, LoginViewControllerDelegate {
         contentView.addSubview(menuStackView)
 
         let menuItems = [
-            ("bookmark", "我的收藏"),
-            ("clock.arrow.circlepath", "浏览历史"),
-            ("gear", "设置")
+            ("person.2.fill", "账号管理", #selector(accountManagementTapped)),
+            ("bookmark", "我的收藏", nil),
+            ("clock.arrow.circlepath", "浏览历史", nil),
+            ("gear", "设置", nil)
         ]
 
-        for (icon, title) in menuItems {
-            let menuItem = createMenuItem(icon: icon, title: title)
+        for (icon, title, action) in menuItems {
+            let menuItem = createMenuItem(icon: icon, title: title, action: action)
             menuStackView.addArrangedSubview(menuItem)
         }
 
@@ -398,7 +399,7 @@ class ProfileViewController: UIViewController, LoginViewControllerDelegate {
         ])
     }
 
-    private func createMenuItem(icon: String, title: String) -> UIView {
+    private func createMenuItem(icon: String, title: String, action: Selector?) -> UIView {
         let container = UIView()
         container.backgroundColor = Theme.card
 
@@ -438,6 +439,13 @@ class ProfileViewController: UIViewController, LoginViewControllerDelegate {
             arrow.widthAnchor.constraint(equalToConstant: 16),
             arrow.heightAnchor.constraint(equalToConstant: 16)
         ])
+
+        // Add tap gesture if action is provided
+        if let action = action {
+            let tapGesture = UITapGestureRecognizer(target: self, action: action)
+            container.addGestureRecognizer(tapGesture)
+            container.isUserInteractionEnabled = true
+        }
 
         return container
     }
@@ -529,7 +537,9 @@ class ProfileViewController: UIViewController, LoginViewControllerDelegate {
             // If UID is 0, try to fetch it from server first
             if uid == 0 {
                 print("[Profile] UID is 0, fetching UID from server...")
-                fetchUidAndProfile()
+                // 先用原生请求拿 uid。WKWebView 会被 Cloudflare 的 Turnstile 拦住
+                // （过不去，只能超时），而 URLSession 是通的。
+                fetchUidNatively()
             } else {
                 // Use WKWebView to fetch profile (bypasses Cloudflare)
                 print("[Profile] Calling fetchProfileWithWKWebView for uid: \(uid)")
@@ -538,6 +548,48 @@ class ProfileViewController: UIViewController, LoginViewControllerDelegate {
         } else {
             print("[Profile] User not logged in, showing logged out UI")
             updateUIForLoggedOut()
+        }
+    }
+
+    /// 用原生请求从论坛首页解析 `discuz_uid`。
+    ///
+    /// 原来这一步走 WKWebView 打开 memcp.php，但 Cloudflare 会对 WebView 下发
+    /// Turnstile 质询且过不去，结果永远是 "Failed to extract UID"。
+    /// URLSession 不受该限制，直接读 index.php 里的 discuz_uid 即可。
+    private func fetchUidNatively() {
+        Task { [weak self] in
+            guard let self = self else { return }
+
+            var request = URLRequest(url: URL(string: "https://www.4d4y.com/forum/index.php")!)
+            request.setValue("https://www.4d4y.com/forum/", forHTTPHeaderField: "Referer")
+
+            var uid = 0
+            if let (data, _) = try? await NetworkManager.shared.send(request) {
+                let encodings: [String.Encoding] = [
+                    String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(0x80000631))),
+                    .utf8
+                ]
+                for encoding in encodings {
+                    if let html = String(data: data, encoding: encoding) {
+                        uid = NetworkManager.extractDiscuzUid(from: html)
+                        break
+                    }
+                }
+            }
+
+            await MainActor.run {
+                guard uid > 0 else {
+                    print("[Profile] Native UID fetch failed, falling back to WebView")
+                    self.fetchUidAndProfile()
+                    return
+                }
+
+                print("[Profile] Native UID fetch succeeded: \(uid)")
+                LoginManager.shared.uid = uid
+                self.currentFetchingUid = uid
+                self.updateUIForLoggedIn(username: LoginManager.shared.currentUsername ?? "用户", uid: uid)
+                self.fetchProfileWithWKWebView(uid: uid)
+            }
         }
     }
 
@@ -552,7 +604,7 @@ class ProfileViewController: UIViewController, LoginViewControllerDelegate {
         configuration.websiteDataStore = .default()
 
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1, height: 1), configuration: configuration)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+        webView.customUserAgent = WebClientConfig.userAgent
         webView.navigationDelegate = self
         webView.isHidden = true
         self.profileWebView = webView
@@ -563,252 +615,40 @@ class ProfileViewController: UIViewController, LoginViewControllerDelegate {
         webView.load(URLRequest(url: URL(string: urlString)!))
     }
 
+    /// 拉取并解析个人资料。
+    ///
+    /// 改走原生请求，原因有二：
+    /// 1. Cloudflare 拦的是 WKWebView，URLSession 是通的
+    /// 2. 更关键——WebView 取回的 `outerHTML` 已经是解码好的 String，
+    ///    之前却被 `html.data(using: .utf8)` 转成字节再交给 GB18030 优先的解析器。
+    ///    GB18030 几乎接受任意字节序列，于是这步"解码"必定成功但产出乱码，
+    ///    导致"积分""帖子"等中文标签全部匹配不上（totalPosts / credits 恒为 0）。
+    ///    原生请求拿到的是真正的 GBK 字节，现有 Data 版解析器本来就是对的。
     private func fetchProfileWithWKWebView(uid: Int) {
         if isLoading { return }
         isLoading = true
         currentFetchingUid = uid
 
-        print("[Profile] Creating WKWebView to fetch profile for uid: \(uid)")
+        print("[Profile] Fetching profile natively for uid: \(uid)")
 
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        Task { [weak self] in
+            guard let self = self else { return }
 
-        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1, height: 1), configuration: configuration)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-        webView.navigationDelegate = self
-        webView.isHidden = true
-        self.profileWebView = webView
-        view.addSubview(webView)
-
-        let urlString = "https://www.4d4y.com/forum/space.php?uid=\(uid)"
-        print("[Profile] Loading URL: \(urlString)")
-        webView.load(URLRequest(url: URL(string: urlString)!))
-    }
-
-    private func parseProfileHTML(_ html: String, defaultUid: Int) -> ForumUser? {
-        do {
-            // Try to parse as GBK
-            let gb18030 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(0x80000631)))
-            let gb2312 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(0x80000630)))
-
-            var decodedHTML = html
-            if let data = html.data(using: .utf8) {
-                if let gbDecoded = String(data: data, encoding: gb18030) {
-                    decodedHTML = gbDecoded
-                } else if let gb2Decoded = String(data: data, encoding: gb2312) {
-                    decodedHTML = gb2Decoded
+            do {
+                let profile = try await NetworkManager.shared.fetchUserProfile(uid: uid)
+                await MainActor.run {
+                    self.isLoading = false
+                    print("[Profile] Parsed profile: username=\(profile.username), posts=\(profile.totalPosts), credits=\(profile.credits)")
+                    self.userProfile = profile
+                    self.updateUIWithProfile(profile)
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    print("[Profile] Native profile fetch failed: \(error.localizedDescription)")
+                    self.onlineStatusLabel.text = "加载失败"
                 }
             }
-
-            print("[Profile] Parsing HTML length: \(decodedHTML.count)")
-
-            // Extract username from h1
-            var username = "未知用户"
-            if let h1Range = decodedHTML.range(of: "<h1>") {
-                let afterH1 = String(decodedHTML[h1Range.upperBound...])
-                if let endRange = afterH1.range(of: "</h1>") {
-                    username = String(afterH1[..<endRange.lowerBound])
-                    // Remove any HTML tags like <img>
-                    username = username.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-                    username = username.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-            }
-
-            // Extract UID from discuz_uid
-            var extractedUid = 0
-            if let uidRange = decodedHTML.range(of: "discuz_uid\\s*=\\s*(\\d+)", options: .regularExpression) {
-                let uidStr = String(decodedHTML[uidRange])
-                    .replacingOccurrences(of: "discuz_uid", with: "")
-                    .replacingOccurrences(of: "=", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                extractedUid = Int(uidStr) ?? 0
-            } else {
-                extractedUid = defaultUid
-            }
-
-            // Extract avatar
-            var avatar: String?
-            if let avatarRange = decodedHTML.range(of: "class=\"avatar\"[^>]*>\\s*<img[^>]+src=\"([^\"]+)\"", options: .regularExpression) {
-                let match = String(decodedHTML[avatarRange])
-                if let srcRange = match.range(of: "src=\"([^\"]+)\"", options: .regularExpression) {
-                    avatar = String(match[srcRange])
-                        .replacingOccurrences(of: "src=\"", with: "")
-                        .replacingOccurrences(of: "\"", with: "")
-                }
-            }
-
-            // Check online status
-            let isOnline = decodedHTML.contains("online_buddy.gif")
-
-            // Extract gender
-            var gender: String?
-            if decodedHTML.contains("性别:</th>") || decodedHTML.contains("性别:") {
-                if decodedHTML.contains(">男<") || decodedHTML.contains("男</td>") {
-                    gender = "男"
-                } else if decodedHTML.contains(">女<") || decodedHTML.contains("女</td>") {
-                    gender = "女"
-                }
-            }
-
-            // Extract QQ
-            var qq: String?
-            if let qqRange = decodedHTML.range(of: "Uin=(\\d+)&", options: .regularExpression) {
-                let match = String(decodedHTML[qqRange])
-                    .replacingOccurrences(of: "Uin=", with: "")
-                    .replacingOccurrences(of: "&", with: "")
-                qq = match.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-
-            // Extract user group
-            var userGroup = "初级会员"
-            if let groupRange = decodedHTML.range(of: "用户组:\\s*<a[^>]+>([^<]+)</a>", options: .regularExpression) {
-                let match = String(decodedHTML[groupRange])
-                if let linkRange = match.range(of: ">([^<]+)<", options: .regularExpression) {
-                    userGroup = String(match[linkRange])
-                        .replacingOccurrences(of: ">", with: "")
-                        .replacingOccurrences(of: "<", with: "")
-                }
-            }
-
-            // Extract registration date
-            var registrationDate: String?
-            if let regRange = decodedHTML.range(of: "注册日期:\\s*(\\d{4}-\\d{2}-\\d{2})", options: .regularExpression) {
-                let match = String(decodedHTML[regRange])
-                registrationDate = match.replacingOccurrences(of: "注册日期:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-
-            // Extract last visit
-            var lastVisitDate: String?
-            if let visitRange = decodedHTML.range(of: "上次访问:\\s*(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2})", options: .regularExpression) {
-                let match = String(decodedHTML[visitRange])
-                lastVisitDate = match.replacingOccurrences(of: "上次访问:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-
-            // Extract last post
-            var lastPostDate: String?
-            if let postRange = decodedHTML.range(of: "最后发表:\\s*(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2})", options: .regularExpression) {
-                let match = String(decodedHTML[postRange])
-                lastPostDate = match.replacingOccurrences(of: "最后发表:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-
-            // Extract post level
-            var postLevel: String?
-            if let levelRange = decodedHTML.range(of: "发帖数级别:\\s*([^<\\n]+)", options: .regularExpression) {
-                let match = String(decodedHTML[levelRange])
-                postLevel = match.replacingOccurrences(of: "发帖数级别:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                // Clean up star images
-                postLevel = postLevel?.replacingOccurrences(of: "<img[^>]+>", with: "", options: .regularExpression)
-                postLevel = postLevel?.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-
-            // Extract read permission
-            var readPermission = 0
-            if let permRange = decodedHTML.range(of: "阅读权限:\\s*(\\d+)", options: .regularExpression) {
-                let match = String(decodedHTML[permRange])
-                let permStr = match.replacingOccurrences(of: "阅读权限:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                readPermission = Int(permStr) ?? 0
-            }
-
-            // Extract total posts
-            var totalPosts = 0
-            if let postsRange = decodedHTML.range(of: "帖子:\\s*(\\d+)", options: .regularExpression) {
-                let match = String(decodedHTML[postsRange])
-                let postsStr = match.replacingOccurrences(of: "帖子:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                totalPosts = Int(postsStr) ?? 0
-            }
-
-            // Extract daily average
-            var dailyAveragePosts: Double = 0
-            if let avgRange = decodedHTML.range(of: "平均每日发帖:\\s*([\\d.]+)", options: .regularExpression) {
-                let match = String(decodedHTML[avgRange])
-                let avgStr = match.replacingOccurrences(of: "平均每日发帖:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                dailyAveragePosts = Double(avgStr) ?? 0
-            }
-
-            // Extract essence posts
-            var essencePosts = 0
-            if let essenceRange = decodedHTML.range(of: "精华:\\s*(\\d+)", options: .regularExpression) {
-                let match = String(decodedHTML[essenceRange])
-                let essenceStr = match.replacingOccurrences(of: "精华:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                essencePosts = Int(essenceStr) ?? 0
-            }
-
-            // Extract page views
-            var pageViews = 0
-            if let viewsRange = decodedHTML.range(of: "页面访问量:\\s*([\\d,]+)", options: .regularExpression) {
-                let match = String(decodedHTML[viewsRange])
-                let viewsStr = match.replacingOccurrences(of: "页面访问量:", with: "").replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                pageViews = Int(viewsStr) ?? 0
-            }
-
-            // Extract online hours
-            var totalOnlineHours: Double = 0
-            if let totalRange = decodedHTML.range(of: "总计在线\\s*<em>([\\d.]+)</em>", options: .regularExpression) {
-                let match = String(decodedHTML[totalRange])
-                let hoursStr = match.replacingOccurrences(of: "总计在线", with: "").replacingOccurrences(of: "<em>", with: "").replacingOccurrences(of: "</em>", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                totalOnlineHours = Double(hoursStr) ?? 0
-            }
-
-            var monthOnlineHours: Double = 0
-            if let monthRange = decodedHTML.range(of: "本月在线\\s*<em>([\\d.]+)</em>", options: .regularExpression) {
-                let match = String(decodedHTML[monthRange])
-                let hoursStr = match.replacingOccurrences(of: "本月在线", with: "").replacingOccurrences(of: "<em>", with: "").replacingOccurrences(of: "</em>", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                monthOnlineHours = Double(hoursStr) ?? 0
-            }
-
-            // Extract credits
-            var credits = 0
-            if let creditRange = decodedHTML.range(of: "积分:\\s*(\\d+)", options: .regularExpression) {
-                let match = String(decodedHTML[creditRange])
-                let creditStr = match.replacingOccurrences(of: "积分:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                credits = Int(creditStr) ?? 0
-            }
-
-            var prestige = 0
-            if let presRange = decodedHTML.range(of: "威望:\\s*(\\d+)", options: .regularExpression) {
-                let match = String(decodedHTML[presRange])
-                let presStr = match.replacingOccurrences(of: "威望:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                prestige = Int(presStr) ?? 0
-            }
-
-            var money = 0
-            if let moneyRange = decodedHTML.range(of: "金钱:\\s*(\\d+)", options: .regularExpression) {
-                let match = String(decodedHTML[moneyRange])
-                let moneyStr = match.replacingOccurrences(of: "金钱:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                money = Int(moneyStr) ?? 0
-            }
-
-            return ForumUser(
-                uid: extractedUid,
-                username: username,
-                avatar: avatar,
-                isOnline: isOnline,
-                gender: gender,
-                qq: qq,
-                msn: nil,
-                userGroup: userGroup,
-                registrationDate: registrationDate,
-                lastVisitDate: lastVisitDate,
-                lastPostDate: lastPostDate,
-                registrationIP: nil,
-                lastVisitIP: nil,
-                postLevel: postLevel,
-                readPermission: readPermission,
-                totalPosts: totalPosts,
-                dailyAveragePosts: dailyAveragePosts,
-                essencePosts: essencePosts,
-                pageViews: pageViews,
-                totalOnlineHours: totalOnlineHours,
-                monthOnlineHours: monthOnlineHours,
-                credits: credits,
-                prestige: prestige,
-                money: money,
-                sellerCredit: 0,
-                buyerCredit: 0
-            )
-        } catch {
-            print("[Profile] Failed to parse HTML: \(error)")
-            return nil
         }
     }
 
@@ -939,7 +779,8 @@ extension ProfileViewController: WKNavigationDelegate {
                 if let html = result as? String {
                     print("[Profile] Got HTML length: \(html.count)")
 
-                    if let profile = self.parseProfileHTML(html, defaultUid: self.currentFetchingUid) {
+                    // 用共享的 SwiftSoup 解析器（String 入口，不做多余的重解码）
+                    if let profile = try? ForumHTMLParser.parseUserProfile(html: html) {
                         print("[Profile] Parsed profile successfully!")
                         print("[Profile] username: \(profile.username)")
                         print("[Profile] uid: \(profile.uid)")
@@ -979,5 +820,30 @@ extension ProfileViewController: WKNavigationDelegate {
         profileWebView?.removeFromSuperview()
         profileWebView = nil
         onlineStatusLabel.text = "加载失败"
+    }
+
+    // MARK: - Account Management
+
+    @objc private func accountManagementTapped() {
+        let accountSwitcherVC = AccountSwitcherViewController()
+        accountSwitcherVC.delegate = self
+        let navVC = UINavigationController(rootViewController: accountSwitcherVC)
+        present(navVC, animated: true)
+    }
+}
+
+// MARK: - AccountSwitcherDelegate
+
+extension ProfileViewController: AccountSwitcherDelegate {
+    func accountSwitcherDidSwitchAccount(_ controller: AccountSwitcherViewController) {
+        // 账号切换成功，刷新界面
+        print("[Profile] Account switched, reloading user data")
+        loadUserData()
+    }
+
+    func accountSwitcherDidAddAccount(_ controller: AccountSwitcherViewController) {
+        // 新增账号成功，刷新界面
+        print("[Profile] New account added, reloading user data")
+        loadUserData()
     }
 }

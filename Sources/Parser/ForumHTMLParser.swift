@@ -719,13 +719,24 @@ class ForumHTMLParser {
         }
 
         // Extract date from cite
+        //
+        // `<p class="cite"><cite><a>用户名</a></cite>昨天 14:20</p>`
+        // 时间格式并不统一：近期是相对时间（"昨天 14:20"），较早的是绝对时间，
+        // 且月/日不补零（"2025-4-10 21:33"）。原来的正则要求
+        // `\d{4}-\d{2}-\d{2}`，两种都匹配不上，messageDate 因此恒为空。
+        //
+        // 与其枚举格式，不如把 p.cite 的文本减去 <cite> 里的用户名，
+        // 剩下的就是时间，对任何格式都成立。
         var messageDate = ""
         if let cite = try? item.select("p.cite").first() {
-            let text = try cite.text()
-            // Date is at the end, after the username
-            if let dateRange = text.range(of: "\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}", options: .regularExpression) {
-                messageDate = String(text[dateRange])
+            var text = (try? cite.text()) ?? ""
+            if let nameEl = try? cite.select("cite").first(),
+               let name = try? nameEl.text(),
+               !name.isEmpty,
+               let nameRange = text.range(of: name) {
+                text.removeSubrange(nameRange)
             }
+            messageDate = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         // Extract subject/title
@@ -1113,6 +1124,16 @@ class ForumHTMLParser {
             throw NetworkError.parsingFailed("Failed to decode User Profile HTML")
         }
 
+        return try parseUserProfile(html: decodedHTML)
+    }
+
+    /// 解析已经解码好的 HTML（例如 WKWebView 的 `outerHTML`）。
+    ///
+    /// ⚠️ 这种场景**不要**再走上面的 Data 版本：把已解码的 String 转成
+    /// `data(using: .utf8)` 再交给 GB18030 优先的解码器，会把 UTF-8 字节
+    /// 当成 GB18030 解一遍。GB18030 几乎接受任意字节序列，所以这步必定
+    /// "成功"却产出乱码，中文标签全部匹配不上。
+    static func parseUserProfile(html decodedHTML: String) throws -> ForumUser {
         let doc = try SwiftSoup.parse(decodedHTML)
 
         // Extract username from h1 in profilecontent
@@ -1126,8 +1147,11 @@ class ForumHTMLParser {
         }
 
         // Extract UID from script variable: discuz_uid = 717232
+        //
+        // 必须搜整篇文档：discuz_uid 是 <head> 里那段 script 定义的，
+        // 原来只搜 doc.body() 永远匹配不到，uid 因此恒为 0。
         var uid = 0
-        if let bodyHtml = try? doc.body()?.html() ?? "" {
+        if let bodyHtml = try? doc.html() {
             let pattern = "discuz_uid\\s*=\\s*(\\d+)"
             if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
                 let range = NSRange(bodyHtml.startIndex..., in: bodyHtml)
@@ -1302,7 +1326,28 @@ class ForumHTMLParser {
         }
 
         // Extract credits
-        if let creditsText = try? doc.select("#profilecontent h3.blocktitle").first()?.nextElementSibling()?.text() {
+        //
+        // 实际结构（4d4y / Discuz 7.2）：
+        //   <h3 class="blocktitle lightlink">积分: 7</h3>
+        //   <p>威望: 7 ,&nbsp;金钱: 0 </p>
+        // 「积分」在 h3 自身，「威望 / 金钱」才在紧随其后的 <p> 里。
+        //
+        // 两个坑：
+        // 1. 原来只取 nextElementSibling()，把 h3 自身漏掉了 → 积分恒为 0
+        // 2. 页面里有 3 个 h3.blocktitle（用户组 / 积分 / 信用评价），
+        //    .first() 取到的是「用户组: 初级会员」，必须逐个找含「积分:」的那个
+        let creditsBlocks = (try? doc.select("#profilecontent h3.blocktitle")) ?? Elements()
+        for header in creditsBlocks {
+            var creditsText = (try? header.text()) ?? ""
+            if let sibling = try? header.nextElementSibling(),
+               let siblingText = try? sibling.text() {
+                creditsText += " " + siblingText
+            }
+
+            guard creditsText.contains("积分:") || creditsText.contains("威望:") || creditsText.contains("金钱:") else {
+                continue
+            }
+
             if creditsText.contains("积分:") {
                 let creditsPattern = "积分:\\s*(\\d+)"
                 if let range = creditsText.range(of: creditsPattern, options: .regularExpression) {
@@ -1322,6 +1367,7 @@ class ForumHTMLParser {
                     money = Int(match.replacingOccurrences(of: "金钱:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
                 }
             }
+            break
         }
 
         // Extract credit ratings

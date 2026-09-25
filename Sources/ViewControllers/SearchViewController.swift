@@ -105,22 +105,35 @@ class SearchViewController: UIViewController {
         loadingIndicator.startAnimating()
         emptyLabel.isHidden = true
 
-        // Create hidden WKWebView to handle Cloudflare
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        // 改走原生请求。
+        // 之前用 WKWebView 取 outerHTML 再 `html.data(using: .utf8)` 交给
+        // GB18030 优先的解析器 —— UTF-8 字节被当成 GB18030 解码，必定"成功"却全是乱码。
+        // 且关键词需按 GBK 编码，由 NetworkManager.search 统一处理。
+        print("[Search] Searching natively for: \(keyword)")
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-        webView.navigationDelegate = self
-        webView.isHidden = true
-        self.webView = webView
-        view.addSubview(webView)
-
-        let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword
-        let searchURL = URL(string: "https://www.4d4y.com/forum/search.php?srchtype=title&srchtxt=\(encodedKeyword)&searchsubmit=true&st=on&srchuname=&srchfilter=all&srchfrom=0&before=&orderby=lastpost&ascdesc=desc")!
-        webView.load(URLRequest(url: searchURL))
-
-        print("[Search] Searching for: \(keyword)")
+        Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                let detail = try await NetworkManager.shared.search(keyword: keyword, page: 1)
+                await MainActor.run {
+                    self.isLoading = false
+                    self.loadingIndicator.stopAnimating()
+                    print("[Search] Got \(detail.results.count) results (total \(detail.totalResults))")
+                    self.searchResults = detail.results
+                    self.currentPage = detail.currentPage
+                    self.totalPages = detail.totalPages
+                    self.tableView.reloadData()
+                    self.updateEmptyState()
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.loadingIndicator.stopAnimating()
+                    print("[Search] Failed: \(error.localizedDescription)")
+                    self.updateEmptyState()
+                }
+            }
+        }
     }
 
     private func extractSearchResults() {

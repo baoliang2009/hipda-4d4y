@@ -4,7 +4,7 @@ class CacheManager {
     static let shared = CacheManager()
 
     private let cacheDirectory: URL
-    private let cacheExpiration: TimeInterval = 5 * 60 // 5 minutes cache
+    private let cacheExpiration: TimeInterval = 5 * 60 // 5 minutes default
     private let maxCacheSize: Int = 50 * 1024 * 1024 // 50MB max cache
 
     private init() {
@@ -13,21 +13,28 @@ class CacheManager {
 
         // Create cache directory if needed
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+
+        // Clean up old cache on init
+        cleanupOldCache()
     }
 
     // MARK: - Save Cache
 
-    func save<T: Encodable>(_ object: T, forKey key: String) {
+    func save<T: Encodable>(_ object: T, forKey key: String, expiresIn: TimeInterval? = nil) {
         let fileURL = cacheFileURL(for: key)
 
         do {
             let data = try JSONEncoder().encode(object)
             try data.write(to: fileURL)
 
-            // Update metadata
-            saveMetadata(forKey: key, data: data)
+            // Update metadata with custom expiration
+            let expiration = expiresIn ?? cacheExpiration
+            saveMetadata(forKey: key, data: data, expiresIn: expiration)
 
-            print("[Cache] Saved: \(key) (\(data.count) bytes)")
+            print("[Cache] Saved: \(key) (\(data.count) bytes, expires in \(Int(expiration))s)")
+
+            // Check and enforce cache size limit
+            enforceCacheSizeLimit()
         } catch {
             print("[Cache] Failed to save \(key): \(error)")
         }
@@ -47,6 +54,7 @@ class CacheManager {
         // Check if expired
         guard !isExpired(forKey: key) else {
             print("[Cache] Expired: \(key)")
+            clearCache(forKey: key)
             return nil
         }
 
@@ -57,6 +65,8 @@ class CacheManager {
             return object
         } catch {
             print("[Cache] Failed to load \(key): \(error)")
+            // Clear corrupted cache
+            clearCache(forKey: key)
             return nil
         }
     }
@@ -65,11 +75,12 @@ class CacheManager {
 
     func isExpired(forKey key: String) -> Bool {
         guard let metadata = loadMetadata(forKey: key),
-              let timestamp = metadata["timestamp"] as? TimeInterval else {
+              let timestamp = metadata["timestamp"] as? TimeInterval,
+              let expiration = metadata["expiration"] as? TimeInterval else {
             return true
         }
 
-        return Date().timeIntervalSince1970 - timestamp > cacheExpiration
+        return Date().timeIntervalSince1970 - timestamp > expiration
     }
 
     func getCacheAge(forKey key: String) -> String? {
@@ -106,23 +117,91 @@ class CacheManager {
         print("[Cache] Cleared all cache")
     }
 
+    // MARK: - Cache Size Management
+
+    private func enforceCacheSizeLimit() {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.fileSizeKey, .creationDateKey]
+        ) else {
+            return
+        }
+
+        // Calculate total size
+        var totalSize = 0
+        for file in files where file.pathExtension == "json" {
+            if let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                totalSize += size
+            }
+        }
+
+        // If over limit, remove oldest files
+        if totalSize > maxCacheSize {
+            print("[Cache] Cache size (\(totalSize) bytes) exceeds limit (\(maxCacheSize) bytes), cleaning up...")
+
+            // Sort files by creation date (oldest first)
+            let sortedFiles = files.filter { $0.pathExtension == "json" }.sorted { file1, file2 in
+                let date1 = (try? file1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+                let date2 = (try? file2.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+                return date1 < date2
+            }
+
+            // Remove files until under limit
+            var currentSize = totalSize
+            for file in sortedFiles {
+                guard currentSize > maxCacheSize * 3 / 4 else { break } // Remove until 75% of limit
+
+                if let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                    try? FileManager.default.removeItem(at: file)
+
+                    // Also remove metadata file
+                    let metadataURL = file.deletingPathExtension().appendingPathExtension("meta")
+                    try? FileManager.default.removeItem(at: metadataURL)
+
+                    currentSize -= size
+                    print("[Cache] Removed old cache file: \(file.lastPathComponent)")
+                }
+            }
+        }
+    }
+
+    private func cleanupOldCache() {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: []) else {
+            return
+        }
+
+        var removedCount = 0
+        for file in files where file.pathExtension == "json" {
+            let key = file.deletingPathExtension().lastPathComponent
+            if isExpired(forKey: key) {
+                clearCache(forKey: key)
+                removedCount += 1
+            }
+        }
+
+        if removedCount > 0 {
+            print("[Cache] Cleaned up \(removedCount) expired cache files")
+        }
+    }
+
     // MARK: - Private Helpers
 
     private func cacheFileURL(for key: String) -> URL {
-        let safeKey = key.replacingOccurrences(of: "/", with: "_")
+        let safeKey = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? key.replacingOccurrences(of: "/", with: "_")
         return cacheDirectory.appendingPathComponent("\(safeKey).json")
     }
 
     private func metadataFileURL(for key: String) -> URL {
-        let safeKey = key.replacingOccurrences(of: "/", with: "_")
+        let safeKey = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? key.replacingOccurrences(of: "/", with: "_")
         return cacheDirectory.appendingPathComponent("\(safeKey).meta")
     }
 
-    private func saveMetadata(forKey key: String, data: Data) {
+    private func saveMetadata(forKey key: String, data: Data, expiresIn: TimeInterval) {
         let metadataURL = metadataFileURL(for: key)
         let metadata: [String: Any] = [
             "timestamp": Date().timeIntervalSince1970,
-            "size": data.count
+            "size": data.count,
+            "expiration": expiresIn
         ]
 
         if let plistData = try? PropertyListSerialization.data(fromPropertyList: metadata, format: .binary, options: 0) {
@@ -132,7 +211,10 @@ class CacheManager {
 
     private func loadMetadata(forKey key: String) -> [String: Any]? {
         let metadataURL = metadataFileURL(for: key)
-        return try? PropertyListSerialization.propertyList(from: Data(contentsOf: metadataURL), format: nil) as? [String: Any]
+        guard let data = try? Data(contentsOf: metadataURL) else {
+            return nil
+        }
+        return try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
     }
 
     // MARK: - Cache Statistics
@@ -174,7 +256,10 @@ extension CacheManager {
         static func forumList() -> String { return "forum_list" }
         static func threadList(fid: Int, page: Int) -> String { return "thread_list_fid\(fid)_page\(page)" }
         static func threadDetail(tid: Int, page: Int) -> String { return "thread_detail_tid\(tid)_page\(page)" }
-        static func searchResults(keyword: String, page: Int) -> String { return "search_\(keyword)_page\(page)" }
+        static func searchResults(keyword: String, page: Int) -> String {
+            let safeKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? keyword
+            return "search_\(safeKeyword)_page\(page)"
+        }
         static func privateMessages(page: Int) -> String { return "pm_list_page\(page)" }
     }
 }

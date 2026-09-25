@@ -4,9 +4,9 @@ class LoginManager {
     static let shared = LoginManager()
 
     private let usernameKey = "forum_username"
-    private let passwordKey = "forum_password"
+    private let passwordKey = "forum_password_secure"
     private let questionIdKey = "forum_question_id"
-    private let answerKey = "forum_answer"
+    private let answerKey = "forum_answer_secure"
     private let isLoggedInKey = "forum_is_logged_in"
     private let loginDateKey = "forum_login_date"
     private let cookiesKey = "forum_cookies"
@@ -15,6 +15,8 @@ class LoginManager {
     private init() {
         // Restore cookies on startup
         restoreCookies()
+        // Migrate old credentials if needed
+        migrateOldCredentials()
     }
 
     var username: String? {
@@ -28,8 +30,14 @@ class LoginManager {
     }
 
     var password: String? {
-        get { UserDefaults.standard.string(forKey: passwordKey) }
-        set { UserDefaults.standard.set(newValue, forKey: passwordKey) }
+        get { KeychainManager.shared.load(forKey: passwordKey) }
+        set {
+            if let value = newValue {
+                _ = KeychainManager.shared.save(value, forKey: passwordKey)
+            } else {
+                _ = KeychainManager.shared.delete(forKey: passwordKey)
+            }
+        }
     }
 
     var questionId: Int {
@@ -38,12 +46,24 @@ class LoginManager {
     }
 
     var answer: String? {
-        get { UserDefaults.standard.string(forKey: answerKey) }
-        set { UserDefaults.standard.set(newValue, forKey: answerKey) }
+        get { KeychainManager.shared.load(forKey: answerKey) }
+        set {
+            if let value = newValue {
+                _ = KeychainManager.shared.save(value, forKey: answerKey)
+            } else {
+                _ = KeychainManager.shared.delete(forKey: answerKey)
+            }
+        }
     }
 
     var isLoggedIn: Bool {
         get {
+            // 优先检查 AccountManager 中是否有激活账号
+            if AccountManager.shared.activeAccount != nil {
+                return true
+            }
+
+            // 否则检查旧的登录状态（向后兼容）
             let loggedIn = UserDefaults.standard.bool(forKey: isLoggedInKey)
             if loggedIn {
                 refreshLoginState()
@@ -53,21 +73,56 @@ class LoginManager {
         set { UserDefaults.standard.set(newValue, forKey: isLoggedInKey) }
     }
 
+    /// 获取当前账号信息（多账号支持）
+    var currentAccount: Account? {
+        return AccountManager.shared.activeAccount
+    }
+
+    /// 获取当前用户名（兼容旧代码）
+    var currentUsername: String? {
+        return currentAccount?.username ?? username
+    }
+
+    /// 获取当前 UID（兼容旧代码）
+    var currentUid: Int {
+        return currentAccount?.uid ?? uid
+    }
+
     private var loginDate: Date? {
         get { UserDefaults.standard.object(forKey: loginDateKey) as? Date }
         set { UserDefaults.standard.set(newValue, forKey: loginDateKey) }
     }
 
     func saveCredentials(username: String, password: String, questionId: Int, answer: String, uid: Int = 0) {
+        // uid 是登录流程中从 memcp.php 解析出来后写进 self.uid 的，
+        // 调用方通常不带 uid 参数，这里不能用 0 把它冲掉
+        let resolvedUid = uid > 0 ? uid : self.uid
+
         self.username = username
         self.password = password
         self.questionId = questionId
         self.answer = answer
-        self.uid = uid
+        self.uid = resolvedUid
         self.loginDate = Date()
+
+        // 同时保存到 AccountManager。
+        // preserveCurrentCookies: 此刻 HTTPCookieStorage.shared 里是刚登录拿到的
+        // 活 Cookie，必须保留它并以它为准落盘，不能被账号里的旧快照覆盖。
+        AccountManager.shared.saveAccount(
+            username: username,
+            password: password,
+            uid: resolvedUid,
+            questionId: questionId,
+            answer: answer,
+            preserveCurrentCookies: true
+        )
     }
 
     func clearCredentials() {
+        // 使用 AccountManager 的退出功能
+        AccountManager.shared.logout()
+
+        // 清理旧的兼容数据
         username = nil
         password = nil
         questionId = 0
@@ -76,6 +131,29 @@ class LoginManager {
         isLoggedIn = false
         loginDate = nil
         clearCookies()
+
+        // Also clear old UserDefaults keys if they exist
+        UserDefaults.standard.removeObject(forKey: "forum_password")
+        UserDefaults.standard.removeObject(forKey: "forum_answer")
+    }
+
+    // MARK: - Migration
+
+    /// Migrate old plaintext credentials to Keychain
+    private func migrateOldCredentials() {
+        // Migrate password
+        if let oldPassword = UserDefaults.standard.string(forKey: "forum_password") {
+            print("[LoginManager] Migrating password to Keychain")
+            password = oldPassword
+            UserDefaults.standard.removeObject(forKey: "forum_password")
+        }
+
+        // Migrate answer
+        if let oldAnswer = UserDefaults.standard.string(forKey: "forum_answer") {
+            print("[LoginManager] Migrating answer to Keychain")
+            answer = oldAnswer
+            UserDefaults.standard.removeObject(forKey: "forum_answer")
+        }
     }
 
     private func refreshLoginState() {
@@ -91,31 +169,62 @@ class LoginManager {
 
     // MARK: - Cookie Persistence
 
-    /// Save current cookies to UserDefaults
+    /// Save current cookies to UserDefaults with enhanced attributes
     func saveCookies() {
+        // 如果有激活账号，保存到该账号
+        if let activeAccount = AccountManager.shared.activeAccount {
+            AccountManager.shared.saveCookies(for: activeAccount)
+            return
+        }
+
+        // 否则使用旧的保存方式（向后兼容）
         guard let cookies = HTTPCookieStorage.shared.cookies else { return }
 
-        let cookieData = cookies.map { cookie in
-            [
+        let cookieData = cookies.compactMap { cookie -> [String: Any]? in
+            // Only save cookies for 4d4y.com domain
+            guard cookie.domain.contains("4d4y.com") else { return nil }
+
+            var properties: [String: Any] = [
                 "name": cookie.name,
                 "value": cookie.value,
                 "domain": cookie.domain,
                 "path": cookie.path,
-                "secure": cookie.isSecure
-            ] as [String: Any]
+                "secure": cookie.isSecure,
+                "httpOnly": cookie.isHTTPOnly
+            ]
+
+            // Save expiration date if available
+            if let expiresDate = cookie.expiresDate {
+                properties["expires"] = expiresDate.timeIntervalSince1970
+            }
+
+            // Save version
+            properties["version"] = cookie.version
+
+            return properties
         }
 
         UserDefaults.standard.set(cookieData, forKey: cookiesKey)
-        print("[LoginManager] Saved \(cookies.count) cookies")
+        print("[LoginManager] Saved \(cookieData.count) cookies with full attributes")
     }
 
-    /// Restore cookies from UserDefaults
+    /// Restore cookies from UserDefaults with enhanced attributes
     func restoreCookies() {
-        guard let cookieData = UserDefaults.standard.array(forKey: cookiesKey) as? [[String: Any]] else {
+        // 如果 AccountManager 有激活账号，它会自动恢复 Cookie
+        if AccountManager.shared.activeAccount != nil {
+            print("[LoginManager] Skipping cookie restore - AccountManager handles it")
             return
         }
 
+        guard let cookieData = UserDefaults.standard.array(forKey: cookiesKey) as? [[String: Any]] else {
+            print("[LoginManager] No saved cookies found in UserDefaults key: \(cookiesKey)")
+            return
+        }
+
+        print("[LoginManager] Found \(cookieData.count) cookies to restore from legacy storage")
+
         let storage = HTTPCookieStorage.shared
+        var restoredCount = 0
 
         for data in cookieData {
             guard let name = data["name"] as? String,
@@ -125,22 +234,43 @@ class LoginManager {
                 continue
             }
 
-            let properties: [HTTPCookiePropertyKey: Any] = [
+            var properties: [HTTPCookiePropertyKey: Any] = [
                 .name: name,
                 .value: value,
                 .domain: domain,
-                .path: path,
-                .secure: data["secure"] as? Bool ?? false
+                .path: path
             ]
+
+            // Restore secure flag
+            if let secure = data["secure"] as? Bool, secure {
+                properties[.secure] = "TRUE"
+            }
+
+            // Restore expiration date and check if expired
+            if let expiresTimestamp = data["expires"] as? TimeInterval {
+                let expiresDate = Date(timeIntervalSince1970: expiresTimestamp)
+                // Only restore non-expired cookies
+                if expiresDate > Date() {
+                    properties[.expires] = expiresDate
+                } else {
+                    print("[LoginManager] Skipping expired cookie: \(name)")
+                    continue
+                }
+            }
+
+            // Restore version
+            if let version = data["version"] as? Int {
+                properties[.version] = version
+            }
 
             if let cookie = HTTPCookie(properties: properties) {
                 storage.setCookie(cookie)
+                restoredCount += 1
+                print("[LoginManager] Restored cookie: \(name)")
             }
         }
 
-        if let cookies = storage.cookies {
-            print("[LoginManager] Restored \(cookies.count) cookies")
-        }
+        print("[LoginManager] Restored \(restoredCount)/\(cookieData.count) cookies")
     }
 
     /// Clear saved cookies
@@ -284,17 +414,39 @@ class LoginManager {
 
     // MARK: - Native Login
 
+    /// 用已保存的凭证重新登录（会话过期时调用）
+    @discardableResult
     func loginWithNetwork() async throws -> Bool {
-        guard let username = username,
+        guard let username = currentUsername,
               let password = password else {
             return false
         }
 
-        return try await NetworkManager.shared.login(
+        let result = try await NetworkManager.shared.nativeLogin(
             username: username,
             password: password,
             questionId: questionId,
             answer: answer ?? ""
+        )
+
+        applySuccessfulLogin(result: result, password: password, answer: answer ?? "")
+        return true
+    }
+
+    /// 登录成功后的统一收尾：写入凭证、账号与 Cookie。
+    ///
+    /// 登录流程的各条路径（原生登录、WebView 兜底）都收敛到这里，
+    /// 避免各自实现一套、顺序不一致再把 Cookie 冲掉。
+    func applySuccessfulLogin(result: NetworkManager.NativeLoginResult, password: String, answer: String) {
+        self.uid = result.uid
+        self.isLoggedIn = true
+
+        saveCredentials(
+            username: result.username,
+            password: password,
+            questionId: questionId,
+            answer: answer,
+            uid: result.uid
         )
     }
 }

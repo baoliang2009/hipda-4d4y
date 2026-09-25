@@ -69,9 +69,29 @@ xcodebuild -project FourD4Y.xcodeproj -scheme FourD4Y -configuration Debug build
 - 编码尝试顺序: GB18030 → GB2312 → UTF-8 → WindowsCP1252
 - 缓存: `CacheManager` 提供 5 分钟过期的磁盘缓存
 
+### Cloudflare：被拦的是 WebView，不是原生请求
+
+这一点与直觉相反，改动网络层前务必先读：
+
+- **URLSession 是通的**。Apple 网络栈的 TLS 指纹被 Cloudflare 放行，直接返回 200 +
+  真实 Discuz 页面。（注意：用 curl 在 Mac 上复现会得到 403，那是 curl 自身的
+  OpenSSL 指纹被拦，不代表 App 的行为。）
+- **WKWebView 会被拦**。Cloudflare 对它下发 Turnstile 托管质询，且**过不去**：
+  挑战页每 ~45 秒自我刷新一次，turnstile iframe 反复 `-999`，等 180 秒依然
+  `challenge=true`。
+
+因此：
+
+- **登录走原生** (`NetworkManager.nativeLogin`)，WebView 流程仅作兜底
+- 取 uid 等只读信息一律走原生，不要用 WebView
+- UA 必须全局一致（`WebClientConfig.userAgent`），POST 表单必须按 **GBK** 逐字节
+  百分号编码，否则中文用户名/安全提问答案会乱码
+
 ### 发帖/回复提交流程
-- **必须通过 WKWebView 执行 JavaScript 提交**，不能用原生 URLSession
-- 原因: Cookie 需要从 WKWebView 同步到服务器
+- 目前仍通过 WKWebView 执行 JavaScript 提交
+- ⚠️ 原先记录的理由（"Cookie 需要从 WKWebView 同步到服务器"）已被推翻，见上一节。
+  鉴于 WebView 现在反而是被 Cloudflare 拦的那条路，发帖/回复**大概率也应改为原生提交**，
+  只是尚未验证
 - 表单字段从页面 HTML 提取 (formhash, posttime, typeid 等)
 
 ## 论坛 URL

@@ -105,21 +105,32 @@ class NotificationsViewController: UIViewController {
         loadingIndicator.startAnimating()
         emptyView.isHidden = true
 
-        // Create hidden WKWebView to handle Cloudflare
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        // 改走原生请求。
+        // 之前用 WKWebView 取 outerHTML，再 `html.data(using: .utf8)` 交给
+        // GB18030 优先的解析器——UTF-8 字节被当作 GB18030 解码，必定"成功"但全是乱码，
+        // 私信列表因此永远解析不出来。原生请求拿到的是真正的 GBK 字节。
+        print("[Notifications] Loading PM list natively...")
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-        webView.navigationDelegate = self
-        webView.isHidden = true
-        self.webView = webView
-        view.addSubview(webView)
+        Task { [weak self] in
+            guard let self = self else { return }
 
-        let pmURL = URL(string: "https://www.4d4y.com/forum/pm.php?filter=privatepm")!
-        webView.load(URLRequest(url: pmURL))
-
-        print("[Notifications] Loading PM list via WKWebView...")
+            do {
+                let messages = try await NetworkManager.shared.fetchPrivateMessages()
+                await MainActor.run {
+                    self.loadingIndicator.stopAnimating()
+                    print("[Notifications] Loaded \(messages.count) private messages")
+                    self.privateMessages = messages
+                    self.tableView.reloadData()
+                    self.updateEmptyState()
+                }
+            } catch {
+                await MainActor.run {
+                    self.loadingIndicator.stopAnimating()
+                    print("[Notifications] Failed to load PMs: \(error.localizedDescription)")
+                    self.updateEmptyState()
+                }
+            }
+        }
     }
 
     private func extractPMList() {

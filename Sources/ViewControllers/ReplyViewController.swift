@@ -174,7 +174,7 @@ class ReplyViewController: UIViewController {
         configuration.websiteDataStore = .default()
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+        webView.customUserAgent = WebClientConfig.userAgent
         webView.navigationDelegate = self
         webView.isHidden = true
         self.webView = webView
@@ -259,12 +259,18 @@ class ReplyViewController: UIViewController {
                     self?.submitButton.setTitle("提交回复", for: .normal)
                     self?.showAlert(title: "错误", message: "提交失败: \(error.localizedDescription)")
                 }
+                return
             }
+
+            print("[Reply] Form submit JS executed successfully")
         }
 
-        // Wait for navigation to complete
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            self?.checkSubmitResult()
+        // Note: Rely on WKNavigationDelegate callbacks for result checking
+        // Only use a fallback timeout in case navigation doesn't happen
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            guard let self = self, self.isSubmitting else { return }
+            print("[Reply] Fallback timeout reached, checking result...")
+            self.checkSubmitResult()
         }
     }
 
@@ -272,33 +278,59 @@ class ReplyViewController: UIViewController {
         guard let webView = webView else { return }
 
         let url = webView.url?.absoluteString ?? ""
+        print("[Reply] Checking submit result, URL: \(url)")
 
-        // Check if we're still on the reply page or navigated away
-        if url.contains("viewthread.php") || url.contains("tid=\(tid)") {
-            print("[Reply] Still on same page, checking for errors...")
+        // Success: navigated to viewthread page
+        if url.contains("viewthread.php") && url.contains("tid=\(tid)") {
+            print("[Reply] SUCCESS: Navigated to thread view")
+            handleSubmitSuccess()
+            return
+        }
 
-            // Check for error messages
-            webView.evaluateJavaScript("document.body.innerText") { [weak self] result, error in
-                if let text = result as? String {
-                    if text.contains("发帖成功") || text.contains("回复成功") || text.contains("succeed") {
+        // Check page content for success/error indicators
+        webView.evaluateJavaScript("document.body.innerText") { [weak self] result, error in
+            guard let self = self else { return }
+
+            if let text = result as? String {
+                print("[Reply] Page text (first 200): \(String(text.prefix(200)))")
+
+                // Check for success indicators
+                let successIndicators = ["发帖成功", "回复成功", "succeed", "操作成功"]
+                for indicator in successIndicators {
+                    if text.contains(indicator) {
+                        print("[Reply] SUCCESS: Found indicator: \(indicator)")
                         DispatchQueue.main.async {
-                            self?.handleSubmitSuccess()
+                            self.handleSubmitSuccess()
                         }
-                    } else if text.contains("错误") || text.contains("失败") || text.contains("error") {
+                        return
+                    }
+                }
+
+                // Check for error indicators
+                let errorIndicators = ["错误", "失败", "error", "请登录", "验证码", "禁止", "不允许"]
+                for indicator in errorIndicators {
+                    if text.contains(indicator) {
+                        print("[Reply] ERROR: Found indicator: \(indicator)")
                         DispatchQueue.main.async {
-                            self?.handleSubmitError("回复提交失败")
+                            self.handleSubmitError("回复失败: \(indicator)")
                         }
-                    } else {
-                        // Try again or show error
-                        DispatchQueue.main.async {
-                            self?.handleSubmitError("无法确认回复是否提交成功")
-                        }
+                        return
                     }
                 }
             }
-        } else {
-            // Navigated away - likely success
-            handleSubmitSuccess()
+
+            // If URL changed from reply page, assume success
+            if !url.contains("post.php") && !url.contains("action=reply") {
+                print("[Reply] SUCCESS: URL changed from reply page")
+                DispatchQueue.main.async {
+                    self.handleSubmitSuccess()
+                }
+            } else {
+                print("[Reply] UNCERTAIN: Still on reply page or cannot determine")
+                DispatchQueue.main.async {
+                    self.handleSubmitError("无法确认回复是否成功，请手动检查")
+                }
+            }
         }
     }
 
@@ -331,7 +363,22 @@ extension ReplyViewController: WKNavigationDelegate {
         let urlString = webView.url?.absoluteString ?? ""
         print("[Reply] Page loaded: \(urlString)")
 
-        // Extract formhash from the page
+        // If submitting and reached thread view, it's success
+        if isSubmitting && urlString.contains("viewthread.php") && urlString.contains("tid=\(tid)") {
+            print("[Reply] SUCCESS: Thread view loaded after submit")
+            handleSubmitSuccess()
+            return
+        }
+
+        // If submitting, check for errors on current page
+        if isSubmitting {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.checkSubmitResult()
+            }
+            return
+        }
+
+        // Normal load - extract formhash from the page
         webView.evaluateJavaScript("document.querySelector('input[name=formhash]')?.value") { [weak self] result, error in
             guard let self = self else { return }
 

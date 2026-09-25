@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Scratch / debug artifacts
+cookies.txt
+login_page.html
+test_login
+test_login.swift
+test_login_webview
+test_login_webview.swift
+
+# Python
+__pycache__/
+*.pyc

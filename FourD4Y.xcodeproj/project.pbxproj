@@ -10,6 +10,7 @@
 		00349D18A57CBE3FD2448840 /* SearchViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A55D7DCDAB9138844813DB27 /* SearchViewController.swift */; };
 		005FCB444EFCC9B96D4A30AA /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0C2EC97B9E5546E928C888 /* AppDelegate.swift */; };
 		05249118C098B3B474B06A7A /* ForumCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D084ECCF842EF73AAC9F57 /* ForumCell.swift */; };
+		13C7CFD21976890D9A6B9743 /* CloudflareManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22ABC244964B615F2F59BCBE /* CloudflareManager.swift */; };
 		1B07BDB4498FA7E9EA5F1BFA /* SearchResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 622EE2FD6A45D6B7D875C0C0 /* SearchResult.swift */; };
 		1B098AF54B6426FF2ED20DA6 /* ThreadDetailViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 343D98C7E4BFBABEF73D1022 /* ThreadDetailViewController.swift */; };
 		1B7F454A4C3EAAD6E75CA1FC /* ForumListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 942D6BE5015ABFC7165F0943 /* ForumListViewController.swift */; };
@@ -20,6 +21,8 @@
 		38BD3CB0DE7EB43ED724277F /* ReadTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 876BD4DC5C6B9997150693B6 /* ReadTracker.swift */; };
 		46F1F8567559B7AE5053C744 /* ContentFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BC61ABD75A278C27962FBA0 /* ContentFormatter.swift */; };
 		4C7D2B8F6FA4AFC9ADBB52E4 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 738188AF8F87372F35186957 /* SceneDelegate.swift */; };
+		529A3403C3D080DC9B0295F6 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = CB6EF0C2C1FA122291514BFD /* LaunchScreen.storyboard */; };
+		580EE67A11F83883ED387EAF /* KeychainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A92B1E4ADCC95E1FD6666E83 /* KeychainManager.swift */; };
 		6034ECA362AC858DC61D0F7C /* SDWebImage in Frameworks */ = {isa = PBXBuildFile; productRef = 8895C992FC1D58B376939A08 /* SDWebImage */; };
 		62D5082EA27BF9531BAD1799 /* ForumManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F4E5B97EF197C3C71560ADE /* ForumManager.swift */; };
 		6685C5D57B0E0B3E9313D09E /* NewThreadViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D47D8F57C0573B16193B46 /* NewThreadViewController.swift */; };
@@ -30,6 +33,7 @@
 		8CBA66107762D73AF90C8536 /* ForumHTMLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 016808113E826901F8EC7285 /* ForumHTMLParser.swift */; };
 		908CCC217A0733C6B424C049 /* HomeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BF8454FB583F3F9B5C20714 /* HomeViewController.swift */; };
 		9390E7526C27FA9C42FE6581 /* ExploreViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FEEE8D92AFE08A2806D7F3E /* ExploreViewController.swift */; };
+		A3CB15AEDA5C22AE00593B72 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BE5686C50C4933295D1948C8 /* Assets.xcassets */; };
 		A98B99F8F7F809675EAF139D /* PMDetailViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70AF0941E6666A358602A9E /* PMDetailViewController.swift */; };
 		B4F209B7654FDA8B40645EE6 /* ThreadCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDC1FAEBAF26E1B615F46F93 /* ThreadCell.swift */; };
 		B62575639A528FAD5AFFA2DC /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB9227CAE7FAE861B075F1DA /* MainViewController.swift */; };
@@ -38,12 +42,16 @@
 		C3A6C8107009D42C90EAEDB5 /* MainTabBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1949CEC1CFF18FED0B0D6052 /* MainTabBarController.swift */; };
 		C8009604F22FF491D3E5DA84 /* ThreadListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C1312867DB1D250DE92ECB1 /* ThreadListViewController.swift */; };
 		CA0D3BC21BD030DDA6250EA1 /* ForumPost.swift in Sources */ = {isa = PBXBuildFile; fileRef = C219FEE73139AF39A17944DF /* ForumPost.swift */; };
+		CC0E3C43886D9E3FEF0AAFFA /* WebClientConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E8E4D21650AA82AAF6C993F /* WebClientConfig.swift */; };
+		D7BF36A3AA33F8854F907326 /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = A02F6F808742F7C7DC1604CD /* Account.swift */; };
 		DA31FF7CC8C2E42B89BB736B /* PostCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0800713389398E547A85EB8 /* PostCell.swift */; };
 		DAA3C98C306E8F385E76D002 /* ImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B14E7A348460502FB37529B /* ImageLoader.swift */; };
 		E8711FBC3FBDB5D9073ACAB4 /* ProfileViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5FE5DD5398AFE7DCFC26BA6 /* ProfileViewController.swift */; };
+		EE229DE2FB5C92205A7FC56F /* AccountManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D991D4A9FEFD7A551389F547 /* AccountManager.swift */; };
 		F02D61C91CFA8228C70ED1FB /* LoginViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70A50342F2F5ACD38C3C5F36 /* LoginViewController.swift */; };
 		F762F67E2BA4490546ADE89A /* PMDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E978D45886EB3554944582F /* PMDetail.swift */; };
 		F979772359CC30652A516398 /* NetworkManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E03B8C3FA0D8D9E28FF4DA78 /* NetworkManager.swift */; };
+		FB41F07898DD2C03D472D594 /* AccountSwitcherViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3963FBAE58B4510525D40B3 /* AccountSwitcherViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -51,9 +59,11 @@
 		0F4E5B97EF197C3C71560ADE /* ForumManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumManager.swift; sourceTree = "<group>"; };
 		1949CEC1CFF18FED0B0D6052 /* MainTabBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabBarController.swift; sourceTree = "<group>"; };
 		195BA6EAC59F3E57FD420251 /* ThreadDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadDetail.swift; sourceTree = "<group>"; };
+		22ABC244964B615F2F59BCBE /* CloudflareManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareManager.swift; sourceTree = "<group>"; };
 		2ABC7FF7BDF1A2497C9066CB /* ForumUser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumUser.swift; sourceTree = "<group>"; };
 		343D98C7E4BFBABEF73D1022 /* ThreadDetailViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadDetailViewController.swift; sourceTree = "<group>"; };
 		3CB5CDBDD0B658089575BF8A /* CacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheManager.swift; sourceTree = "<group>"; };
+		3E8E4D21650AA82AAF6C993F /* WebClientConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebClientConfig.swift; sourceTree = "<group>"; };
 		41CD17CFFAC7E6492BD159CB /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		47D47D8F57C0573B16193B46 /* NewThreadViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewThreadViewController.swift; sourceTree = "<group>"; };
 		55D084ECCF842EF73AAC9F57 /* ForumCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumCell.swift; sourceTree = "<group>"; };
@@ -71,13 +81,19 @@
 		942D6BE5015ABFC7165F0943 /* ForumListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumListViewController.swift; sourceTree = "<group>"; };
 		9E978D45886EB3554944582F /* PMDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMDetail.swift; sourceTree = "<group>"; };
 		9FEEE8D92AFE08A2806D7F3E /* ExploreViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExploreViewController.swift; sourceTree = "<group>"; };
+		A02F6F808742F7C7DC1604CD /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
 		A55D7DCDAB9138844813DB27 /* SearchViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewController.swift; sourceTree = "<group>"; };
 		A5844F619E511E40F08DEF16 /* FourD4Y.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FourD4Y.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A92B1E4ADCC95E1FD6666E83 /* KeychainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainManager.swift; sourceTree = "<group>"; };
 		AC0C2EC97B9E5546E928C888 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		ADAF354812FF936AC988A8E0 /* PrivateMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivateMessage.swift; sourceTree = "<group>"; };
 		B2FDCFB36293DEDD5246CE4D /* NotificationsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsViewController.swift; sourceTree = "<group>"; };
 		B70AF0941E6666A358602A9E /* PMDetailViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMDetailViewController.swift; sourceTree = "<group>"; };
+		BE5686C50C4933295D1948C8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C219FEE73139AF39A17944DF /* ForumPost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumPost.swift; sourceTree = "<group>"; };
+		C3963FBAE58B4510525D40B3 /* AccountSwitcherViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSwitcherViewController.swift; sourceTree = "<group>"; };
+		CB6EF0C2C1FA122291514BFD /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		D991D4A9FEFD7A551389F547 /* AccountManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountManager.swift; sourceTree = "<group>"; };
 		E03B8C3FA0D8D9E28FF4DA78 /* NetworkManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkManager.swift; sourceTree = "<group>"; };
 		E0800713389398E547A85EB8 /* PostCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostCell.swift; sourceTree = "<group>"; };
 		E5FE5DD5398AFE7DCFC26BA6 /* ProfileViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileViewController.swift; sourceTree = "<group>"; };
@@ -101,6 +117,7 @@
 		37EB406411126D3C484E5CD6 = {
 			isa = PBXGroup;
 			children = (
+				A3E2C65FB6B161973DD73FCA /* Resources */,
 				8A474D6EAC90CDCEDCA390BA /* Sources */,
 				D5EF633C329B12DFAC5F3F12 /* Products */,
 			);
@@ -121,7 +138,9 @@
 		823373578E1036092FB06989 /* Network */ = {
 			isa = PBXGroup;
 			children = (
+				22ABC244964B615F2F59BCBE /* CloudflareManager.swift */,
 				E03B8C3FA0D8D9E28FF4DA78 /* NetworkManager.swift */,
+				3E8E4D21650AA82AAF6C993F /* WebClientConfig.swift */,
 			);
 			path = Network;
 			sourceTree = "<group>";
@@ -147,6 +166,7 @@
 		A2D1B4800C330536EA850632 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				A02F6F808742F7C7DC1604CD /* Account.swift */,
 				C219FEE73139AF39A17944DF /* ForumPost.swift */,
 				9169EBFFC84A31F561A208AB /* ForumThread.swift */,
 				2ABC7FF7BDF1A2497C9066CB /* ForumUser.swift */,
@@ -156,6 +176,15 @@
 				195BA6EAC59F3E57FD420251 /* ThreadDetail.swift */,
 			);
 			path = Models;
+			sourceTree = "<group>";
+		};
+		A3E2C65FB6B161973DD73FCA /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				BE5686C50C4933295D1948C8 /* Assets.xcassets */,
+				CB6EF0C2C1FA122291514BFD /* LaunchScreen.storyboard */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		B0617B2458845AE67C256257 /* Parser */ = {
@@ -169,8 +198,10 @@
 		B35277A6E7BF8DCE3830F218 /* Managers */ = {
 			isa = PBXGroup;
 			children = (
+				D991D4A9FEFD7A551389F547 /* AccountManager.swift */,
 				3CB5CDBDD0B658089575BF8A /* CacheManager.swift */,
 				5B14E7A348460502FB37529B /* ImageLoader.swift */,
+				A92B1E4ADCC95E1FD6666E83 /* KeychainManager.swift */,
 				876BD4DC5C6B9997150693B6 /* ReadTracker.swift */,
 			);
 			path = Managers;
@@ -187,6 +218,7 @@
 		F345177E7F086E3548E952F2 /* ViewControllers */ = {
 			isa = PBXGroup;
 			children = (
+				C3963FBAE58B4510525D40B3 /* AccountSwitcherViewController.swift */,
 				9FEEE8D92AFE08A2806D7F3E /* ExploreViewController.swift */,
 				942D6BE5015ABFC7165F0943 /* ForumListViewController.swift */,
 				6BF8454FB583F3F9B5C20714 /* HomeViewController.swift */,
@@ -212,6 +244,7 @@
 			buildConfigurationList = 473EB80E0355CDDDAAF6224D /* Build configuration list for PBXNativeTarget "FourD4Y" */;
 			buildPhases = (
 				E25FDCF464C23D976864B1BD /* Sources */,
+				AD70FC18DC7A5D24152BBA7E /* Resources */,
 				10AD3169329034068F3E0E7B /* Frameworks */,
 			);
 			buildRules = (
@@ -265,13 +298,29 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		AD70FC18DC7A5D24152BBA7E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A3CB15AEDA5C22AE00593B72 /* Assets.xcassets in Resources */,
+				529A3403C3D080DC9B0295F6 /* LaunchScreen.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		E25FDCF464C23D976864B1BD /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D7BF36A3AA33F8854F907326 /* Account.swift in Sources */,
+				EE229DE2FB5C92205A7FC56F /* AccountManager.swift in Sources */,
+				FB41F07898DD2C03D472D594 /* AccountSwitcherViewController.swift in Sources */,
 				005FCB444EFCC9B96D4A30AA /* AppDelegate.swift in Sources */,
 				351C4DEC6FB0DAE990D8EF5A /* CacheManager.swift in Sources */,
+				13C7CFD21976890D9A6B9743 /* CloudflareManager.swift in Sources */,
 				46F1F8567559B7AE5053C744 /* ContentFormatter.swift in Sources */,
 				9390E7526C27FA9C42FE6581 /* ExploreViewController.swift in Sources */,
 				05249118C098B3B474B06A7A /* ForumCell.swift in Sources */,
@@ -283,6 +332,7 @@
 				6DC10EC6DCA7C0C78875C904 /* ForumUser.swift in Sources */,
 				908CCC217A0733C6B424C049 /* HomeViewController.swift in Sources */,
 				DAA3C98C306E8F385E76D002 /* ImageLoader.swift in Sources */,
+				580EE67A11F83883ED387EAF /* KeychainManager.swift in Sources */,
 				BC31E7C5769B7E2EB2014766 /* LoginManager.swift in Sources */,
 				F02D61C91CFA8228C70ED1FB /* LoginViewController.swift in Sources */,
 				C3A6C8107009D42C90EAEDB5 /* MainTabBarController.swift in Sources */,
@@ -305,6 +355,7 @@
 				89EBE3A41924D5E0D4DC90B1 /* ThreadDetail.swift in Sources */,
 				1B098AF54B6426FF2ED20DA6 /* ThreadDetailViewController.swift in Sources */,
 				C8009604F22FF491D3E5DA84 /* ThreadListViewController.swift in Sources */,
+				CC0E3C43886D9E3FEF0AAFFA /* WebClientConfig.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -386,10 +437,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
-				CODE_SIGN_IDENTITY = "";
-				INFOPLIST_FILE = Resources/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Resources/FourD4Y.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -404,10 +453,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
-				CODE_SIGN_IDENTITY = "";
-				INFOPLIST_FILE = Resources/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Resources/FourD4Y.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

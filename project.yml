@@ -38,21 +38,28 @@ targets:
   FourD4Y:
     type: application
     platform: iOS
+    # XcodeGen 没有 `resources:` 这个键，资源必须一并放在 `sources:` 下，
+    # 否则会被静默忽略 —— 之前 Assets.xcassets 就因此没进工程，导致 App 没有图标。
     sources:
-      - path: Sources
-        type: group
-    resources:
-      - path: Resources
-        excludes:
-          - "*.plist"
+      - Sources
+      - path: Resources/Assets.xcassets
+      - path: Resources/LaunchScreen.storyboard
+    # 不要用 `info:` —— 那会让 XcodeGen 每次生成时覆盖重写 Resources/Info.plist，
+    # 把 CFBundleDisplayName / URL Scheme / ATS / Scene 配置等全部冲掉。
+    # 手写的 plist 通过 settings 里的 INFOPLIST_FILE 引用即可。
     dependencies:
       - package: SwiftSoup
       - package: SDWebImage
     settings:
       base:
-        INFOPLIST_FILE: Resources/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.forum.fourd4y
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        CODE_SIGN_IDENTITY: ""
-        CODE_SIGNING_REQUIRED: "NO"
-        CODE_SIGNING_ALLOWED: "NO"
+        # 注意：这里不要再关掉代码签名（曾经设过
+        # CODE_SIGN_IDENTITY: "" / CODE_SIGNING_REQUIRED: NO / CODE_SIGNING_ALLOWED: NO）。
+        # 关掉签名 = App 拿不到 application-identifier 这个 entitlement，
+        # 而 Keychain 读写强依赖它，会全部失败并返回 -34018 (errSecMissingEntitlement)，
+        # 导致密码/安全问题答案既存不进也读不出，"记住登录"形同虚设。
+        #
+        # 同理，entitlements 文件只用 CODE_SIGN_ENTITLEMENTS 引用，
+        # 不要用 XcodeGen 的 `entitlements:` 键——那会覆盖重写该文件。
+        CODE_SIGN_ENTITLEMENTS: Resources/FourD4Y.entitlements

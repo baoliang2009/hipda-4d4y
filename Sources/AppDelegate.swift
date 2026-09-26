@@ -30,4 +30,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>) {
     }
+
+    /// 收到内存警告时主动释放可重建的缓存，降低被系统杀掉的概率。
+    /// SDWebImage 默认会自行清理其内存缓存；这里再显式清一次图片内存缓存，
+    /// 并清空帖子内容的格式化缓存（都能按需重建，不影响数据）。
+    func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
+        print("[Memory] Received memory warning, clearing in-memory caches")
+        SDImageCache.shared.clearMemory()
+        ContentFormatter.clearFormatCache()
+    }
 }

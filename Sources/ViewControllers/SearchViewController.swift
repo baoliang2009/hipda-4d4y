@@ -12,6 +12,7 @@ class SearchViewController: UIViewController {
     private var currentPage = 1
     private var totalPages = 1
     private var isLoading = false
+    private var lastErrorMessage: String?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -99,6 +100,7 @@ class SearchViewController: UIViewController {
         currentKeyword = keyword
         currentPage = 1
         isLoading = true
+        lastErrorMessage = nil
 
         loadingIndicator.startAnimating()
         emptyLabel.isHidden = true
@@ -127,7 +129,12 @@ class SearchViewController: UIViewController {
                 await MainActor.run {
                     self.isLoading = false
                     self.loadingIndicator.stopAnimating()
-                    print("[Search] Failed: \(error.localizedDescription)")
+                    let reason = (error as? NetworkError)?.localizedDescription ?? error.localizedDescription
+                    print("[Search] Failed: \(reason)")
+                    // 失败不再静默：把真实原因显示出来，别和"无结果"混为一谈
+                    self.searchResults = []
+                    self.tableView.reloadData()
+                    self.lastErrorMessage = reason
                     self.updateEmptyState()
                 }
             }
@@ -135,7 +142,10 @@ class SearchViewController: UIViewController {
     }
 
     private func updateEmptyState() {
-        if searchResults.isEmpty && !currentKeyword.isEmpty && !isLoading {
+        if let err = lastErrorMessage {
+            emptyLabel.text = "搜索失败：\(err)\n下拉关键词后重试"
+            emptyLabel.isHidden = false
+        } else if searchResults.isEmpty && !currentKeyword.isEmpty && !isLoading {
             emptyLabel.text = "未找到相关帖子"
             emptyLabel.isHidden = false
         } else if searchResults.isEmpty {

@@ -823,7 +823,21 @@ class NetworkManager {
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
-                throw NetworkError.invalidResponse(statusCode: nil)
+                throw NetworkError.invalidResponse(statusCode: (response as? HTTPURLResponse)?.statusCode)
+            }
+
+            let html = try decodeHTMLData(data)
+
+            // 返回 200 不代表搜索成功：Discuz 会用同样的 200 页面回各种拦截提示。
+            // 这些情况必须抛出可读原因，否则界面只会显示"未找到"，与真无结果无法区分。
+            if html.contains("两次搜索") || html.contains("搜索间隔") || html.contains("间隔不能小于") {
+                throw NetworkError.loginFailed("搜索太频繁，请稍后再试")
+            }
+            if html.contains("您所在的用户组无法使用搜索") || html.contains("无权") {
+                throw NetworkError.loginFailed("当前账号无搜索权限")
+            }
+            if html.contains("请先登录") || html.contains("您需要先登录") {
+                throw NetworkError.unauthorized
             }
 
             return try ForumHTMLParser.parseSearchResults(data)

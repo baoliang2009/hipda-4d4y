@@ -10,6 +10,8 @@ class ThreadDetailViewController: UIViewController {
     private var isLoading = false
     private var formhash: String?
     private var favoriteButton: UIBarButtonItem?
+    /// 楼层实际高度缓存，key = pid。让 estimatedHeight 精确，消除滚动条跳动与反复 layout
+    private var heightCache: [Int: CGFloat] = [:]
 
     init(thread: ForumThread) {
         self.thread = thread
@@ -279,7 +281,13 @@ extension ThreadDetailViewController: UITableViewDataSource, UITableViewDelegate
     }
 
     func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
-        return 200
+        guard indexPath.row < posts.count else { return 200 }
+        return heightCache[posts[indexPath.row].pid] ?? 200
+    }
+
+    func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        guard indexPath.row < posts.count else { return }
+        heightCache[posts[indexPath.row].pid] = cell.frame.height
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {

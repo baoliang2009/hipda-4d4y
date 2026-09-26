@@ -267,6 +267,21 @@ class PostCell: UITableViewCell {
         ])
     }
 
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        // 取消进行中的图片下载，避免复用时把上一条 cell 的图片贴到这条上，
+        // 以及快速滚动时的无谓下载
+        avatarView.sd_cancelCurrentImageLoad()
+        avatarView.image = UIImage(systemName: "person.circle.fill")
+        for imgView in imageViews {
+            imgView.sd_cancelCurrentImageLoad()
+            imgView.removeFromSuperview()
+        }
+        imageViews.removeAll()
+        contentLabel.attributedText = nil
+        titleLabel.text = nil
+    }
+
     func configure(with post: ForumPost) {
         authorNameLabel.text = post.author
         dateLabel.text = post.postDate

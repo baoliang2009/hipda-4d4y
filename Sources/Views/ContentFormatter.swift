@@ -18,6 +18,26 @@ class ContentFormatter {
 
     static var `default` = Style()
 
+    // MARK: - Caching & Precompiled Regex
+
+    /// 已格式化结果缓存。帖子内容不会变，滚动列表里同一条 cell 反复复用时
+    /// 直接命中，避免每次都重跑整条格式化流水线（正则 + 逐行 + BBCode）。
+    private static let formatCache: NSCache<NSString, NSAttributedString> = {
+        let cache = NSCache<NSString, NSAttributedString>()
+        cache.countLimit = 400   // 约等于翻很多页帖子后仍能全部命中
+        return cache
+    }()
+
+    /// 正则只编译一次。原来每次 format 调用都 `try? NSRegularExpression(pattern:)`，
+    /// 在快速滚动时是明显的 CPU 浪费。
+    private static let numericEntityRegex = try? NSRegularExpression(pattern: #"&#(\d+);"#)
+    private static let urlRegex = try? NSRegularExpression(pattern: #"https?://[^\s一-龥<>\[\]]+"#)
+
+    /// 收到内存警告时可主动清空
+    static func clearFormatCache() {
+        formatCache.removeAllObjects()
+    }
+
     // MARK: - HTML Entity Decoding
 
     /// Decodes common HTML entities in text
@@ -53,8 +73,7 @@ class ContentFormatter {
         }
 
         // Handle numeric entities
-        let numericPattern = #"&#(\d+);"#
-        if let regex = try? NSRegularExpression(pattern: numericPattern, options: []) {
+        if let regex = numericEntityRegex {
             let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "")
         }
@@ -65,7 +84,14 @@ class ContentFormatter {
     // MARK: - Main Formatting
 
     /// Converts raw post content to attributed string with proper formatting
-    static func format(_ content: String, style: Style = `default`) -> NSAttributedString {
+    ///
+    /// - Parameter useCache: 默认样式下命中/写入缓存。若传入自定义 `style`，
+    ///   请置为 false，避免与默认样式的缓存串味。
+    static func format(_ content: String, style: Style = `default`, useCache: Bool = true) -> NSAttributedString {
+        if useCache, let cached = formatCache.object(forKey: content as NSString) {
+            return cached
+        }
+
         let result = NSMutableAttributedString()
 
         // Decode HTML entities first
@@ -103,6 +129,9 @@ class ContentFormatter {
             }
         }
 
+        if useCache {
+            formatCache.setObject(result, forKey: content as NSString)
+        }
         return result
     }
 
@@ -136,11 +165,10 @@ class ContentFormatter {
         }
 
         // Process URLs first
-        var remaining = line
+        let remaining = line
         let result = NSMutableAttributedString()
-        let urlPattern = #"https?://[^\s\u4e00-\u9fa5<>\[\]]+"#
 
-        guard let urlRegex = try? NSRegularExpression(pattern: urlPattern, options: []) else {
+        guard let urlRegex = urlRegex else {
             return formatBBCode(line, font: style.font, color: style.textColor)
         }
 

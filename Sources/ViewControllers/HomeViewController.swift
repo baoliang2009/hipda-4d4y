@@ -113,12 +113,12 @@ class HomeViewController: UIViewController {
     }
 
     private func setupHotTopics() {
-        hotTopicsLabel.text = "热门话题"
+        hotTopicsLabel.text = "我的收藏"
         hotTopicsLabel.font = .systemFont(ofSize: 16, weight: .semibold)
         hotTopicsLabel.textColor = Theme.titleText
         contentView.addSubview(hotTopicsLabel)
 
-        let fireIcon = UIImageView(image: UIImage(systemName: "flame.fill"))
+        let fireIcon = UIImageView(image: UIImage(systemName: "star.fill"))
         fireIcon.tintColor = Theme.primary
         fireIcon.contentMode = .scaleAspectFit
         contentView.addSubview(fireIcon)
@@ -241,27 +241,15 @@ class HomeViewController: UIViewController {
             }
         }
 
-        // Load hot threads from fid=2 ordered by replies
-        Task {
-            do {
-                let threads = try await NetworkManager.shared.fetchThreadList(fid: 2, page: 1, filter: "", orderby: "replies")
-                print("[Home] Loaded \(threads.count) hot threads")
-                await MainActor.run {
-                    // Take only first 5 threads
-                    self.hotThreads = Array(threads.prefix(5))
-                    print("[Home] Showing \(self.hotThreads.count) hot threads")
-                    self.updateHotThreads()
-                    self.scrollView.refreshControl?.endRefreshing()
-                }
-            } catch {
-                print("Failed to load hot threads: \(error)")
-                // Fallback to placeholder
-                await MainActor.run {
-                    self.setupPlaceholderHotThreads()
-                    self.scrollView.refreshControl?.endRefreshing()
-                }
-            }
-        }
+        // 我的收藏（本地，无需网络）
+        reloadFavorites()
+    }
+
+    /// 从本地读取收藏并刷新「我的收藏」区块
+    private func reloadFavorites() {
+        hotThreads = FavoriteManager.shared.favoriteThreads
+        print("[Home] Showing \(hotThreads.count) favorite threads")
+        updateHotThreads()
     }
 
     private func sortForums(_ forums: [Forum]) -> [Forum] {
@@ -324,12 +312,16 @@ class HomeViewController: UIViewController {
     }
 
     private func updateHotThreads() {
-        print("[Home] updateHotThreads called with \(hotThreads.count) threads")
         // Clear existing views
         hotThreadsStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
+        // 空状态
+        guard !hotThreads.isEmpty else {
+            hotThreadsStackView.addArrangedSubview(makeEmptyFavoritesView())
+            return
+        }
+
         for (index, thread) in hotThreads.enumerated() {
-            print("[Home] Creating row for thread: \(thread.title)")
             let threadView = createHotThreadRow(
                 index: index + 1,
                 title: thread.title,
@@ -349,22 +341,28 @@ class HomeViewController: UIViewController {
         }
     }
 
-    private func setupPlaceholderHotThreads() {
-        // Clear existing views
-        hotThreadsStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    private func makeEmptyFavoritesView() -> UIView {
+        let container = UIView()
+        container.backgroundColor = Theme.card
 
-        for i in 0..<5 {
-            let threadView = createHotThreadRow(index: i + 1, title: "热门话题 \(i + 1)", views: 1234 + i * 100, replies: 50 + i * 10, thread: nil)
-            hotThreadsStackView.addArrangedSubview(threadView)
+        let label = UILabel()
+        label.text = "还没有收藏的帖子\n在帖子页点右上角 ☆ 即可收藏"
+        label.numberOfLines = 0
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 13)
+        label.textColor = Theme.secondaryText
+        container.addSubview(label)
 
-            if i < 4 {
-                let divider = UIView()
-                divider.backgroundColor = Theme.border
-                divider.translatesAutoresizingMaskIntoConstraints = false
-                divider.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
-                hotThreadsStackView.addArrangedSubview(divider)
-            }
-        }
+        container.translatesAutoresizingMaskIntoConstraints = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            container.heightAnchor.constraint(greaterThanOrEqualToConstant: 88),
+            label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20)
+        ])
+        return container
     }
 
     private func createHotThreadRow(index: Int, title: String, views: Int, replies: Int, thread: ForumThread?) -> UIView {

@@ -9,6 +9,7 @@ class ThreadDetailViewController: UIViewController {
     private var totalPages = 1
     private var isLoading = false
     private var formhash: String?
+    private var favoriteButton: UIBarButtonItem?
 
     init(thread: ForumThread) {
         self.thread = thread
@@ -67,7 +68,60 @@ class ThreadDetailViewController: UIViewController {
         replyButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
         replyButton.tintColor = Theme.primary
         replyButton.addTarget(self, action: #selector(showReply), for: .touchUpInside)
-        navigationItem.rightBarButtonItem = UIBarButtonItem(customView: replyButton)
+
+        favoriteButton = UIBarButtonItem(
+            image: UIImage(systemName: "star"),
+            style: .plain,
+            target: self,
+            action: #selector(toggleFavorite)
+        )
+        favoriteButton?.tintColor = Theme.primary
+
+        // rightBarButtonItems 数组的第一个显示在最右侧
+        navigationItem.rightBarButtonItems = [
+            UIBarButtonItem(customView: replyButton),
+            favoriteButton
+        ].compactMap { $0 }
+
+        updateFavoriteButton()
+    }
+
+    private func updateFavoriteButton() {
+        let favorited = FavoriteManager.shared.isFavorited(tid: thread.tid)
+        favoriteButton?.image = UIImage(systemName: favorited ? "star.fill" : "star")
+    }
+
+    @objc private func toggleFavorite() {
+        let nowFavorited = FavoriteManager.shared.toggle(thread)
+        updateFavoriteButton()
+        showToast(nowFavorited ? "已收藏" : "已取消收藏")
+    }
+
+    private func showToast(_ message: String) {
+        let toast = UILabel()
+        toast.text = message
+        toast.textColor = .white
+        toast.backgroundColor = UIColor.black.withAlphaComponent(0.75)
+        toast.font = .systemFont(ofSize: 14)
+        toast.textAlignment = .center
+        toast.layer.cornerRadius = 18
+        toast.clipsToBounds = true
+        toast.alpha = 0
+        toast.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(toast)
+        NSLayoutConstraint.activate([
+            toast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            toast.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -80),
+            toast.heightAnchor.constraint(equalToConstant: 36),
+            toast.widthAnchor.constraint(greaterThanOrEqualToConstant: 120)
+        ])
+        toast.layoutIfNeeded()
+        toast.frame = toast.frame.insetBy(dx: -16, dy: 0)
+        UIView.animate(withDuration: 0.25, animations: { toast.alpha = 1 }) { _ in
+            UIView.animate(withDuration: 0.25, delay: 1.2, options: [], animations: { toast.alpha = 0 }) { _ in
+                toast.removeFromSuperview()
+            }
+        }
     }
 
     private func loadThreadDetail() {

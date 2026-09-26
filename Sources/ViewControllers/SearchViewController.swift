@@ -1,5 +1,4 @@
 import UIKit
-import WebKit
 
 class SearchViewController: UIViewController {
 
@@ -8,7 +7,6 @@ class SearchViewController: UIViewController {
     private let emptyLabel = UILabel()
     private let loadingIndicator = UIActivityIndicatorView(style: .medium)
 
-    private var webView: WKWebView?
     private var searchResults: [SearchResult] = []
     private var currentKeyword = ""
     private var currentPage = 1
@@ -136,68 +134,6 @@ class SearchViewController: UIViewController {
         }
     }
 
-    private func extractSearchResults() {
-        guard let webView = webView else { return }
-
-        let js = "document.documentElement.outerHTML"
-        webView.evaluateJavaScript(js) { [weak self] result, error in
-            guard let self = self else { return }
-
-            if let error = error {
-                print("[Search] JS error: \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.loadingIndicator.stopAnimating()
-                }
-                return
-            }
-
-            guard let html = result as? String else {
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.loadingIndicator.stopAnimating()
-                }
-                return
-            }
-
-            do {
-                if let data = html.data(using: .utf8) {
-                    let detail = try ForumHTMLParser.parseSearchResults(data)
-                    DispatchQueue.main.async {
-                        self.isLoading = false
-                        self.loadingIndicator.stopAnimating()
-                        self.searchResults = detail.results
-                        self.currentPage = detail.currentPage
-                        self.totalPages = detail.totalPages
-                        self.tableView.reloadData()
-                        self.updateEmptyState()
-                    }
-                } else {
-                    let gbEncoding = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(0x80000631)))
-                    if let data = html.data(using: gbEncoding) {
-                        let detail = try ForumHTMLParser.parseSearchResults(data)
-                        DispatchQueue.main.async {
-                            self.isLoading = false
-                            self.loadingIndicator.stopAnimating()
-                            self.searchResults = detail.results
-                            self.currentPage = detail.currentPage
-                            self.totalPages = detail.totalPages
-                            self.tableView.reloadData()
-                            self.updateEmptyState()
-                        }
-                    }
-                }
-            } catch {
-                print("[Search] Parse error: \(error)")
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.loadingIndicator.stopAnimating()
-                    self.updateEmptyState()
-                }
-            }
-        }
-    }
-
     private func updateEmptyState() {
         if searchResults.isEmpty && !currentKeyword.isEmpty && !isLoading {
             emptyLabel.text = "未找到相关帖子"
@@ -275,27 +211,6 @@ extension SearchViewController: UITableViewDataSource, UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         return 90
-    }
-}
-
-// MARK: - WKNavigationDelegate
-
-extension SearchViewController: WKNavigationDelegate {
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        let urlString = webView.url?.absoluteString ?? ""
-        print("[Search] Page loaded: \(urlString)")
-
-        extractSearchResults()
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
-        print("[Search] Load failed: \(error.localizedDescription)")
-        DispatchQueue.main.async {
-            self.isLoading = false
-            self.loadingIndicator.stopAnimating()
-            self.updateEmptyState()
-        }
     }
 }
 

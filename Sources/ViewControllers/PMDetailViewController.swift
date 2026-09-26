@@ -1,5 +1,4 @@
 import UIKit
-import WebKit
 import SDWebImage
 
 class PMDetailViewController: UIViewController {
@@ -13,7 +12,6 @@ class PMDetailViewController: UIViewController {
     private let sendButton = UIButton(type: .system)
     private let loadingIndicator = UIActivityIndicatorView(style: .medium)
 
-    private var webView: WKWebView?
     private var messages: [PMMessage] = []
     private var formhash: String = ""
 
@@ -125,72 +123,26 @@ class PMDetailViewController: UIViewController {
     private func loadPMDetail() {
         loadingIndicator.startAnimating()
 
-        // Create hidden WKWebView to handle Cloudflare
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        // 改走原生请求。WebView 会被 Cloudflare 拦（页面根本加载不出来，
+        // 之前 didFailLoadForFrame -999 就是这个原因），且 outerHTML 再重解码会乱码。
+        print("[PMDetail] Loading PM natively...")
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.customUserAgent = WebClientConfig.userAgent
-        webView.navigationDelegate = self
-        webView.isHidden = true
-        self.webView = webView
-        view.addSubview(webView)
-
-        let pmURL = URL(string: "https://www.4d4y.com/forum/pm.php?uid=\(uid)&filter=privatepm&daterange=5")!
-        webView.load(URLRequest(url: pmURL))
-
-        print("[PMDetail] Loading PM page via WKWebView...")
-    }
-
-    private func extractPMContent() {
-        guard let webView = webView else { return }
-
-        let js = "document.documentElement.outerHTML"
-        webView.evaluateJavaScript(js) { [weak self] result, error in
-            if let error = error {
-                print("[PMDetail] JS error: \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    self?.loadingIndicator.stopAnimating()
-                }
-                return
-            }
-
-            guard let html = result as? String else {
-                DispatchQueue.main.async {
-                    self?.loadingIndicator.stopAnimating()
-                }
-                return
-            }
-
-            // Parse HTML using ForumHTMLParser
+        Task { [weak self] in
+            guard let self = self else { return }
             do {
-                if let data = html.data(using: .utf8) {
-                    let detail = try ForumHTMLParser.parsePMDetail(data)
-                    DispatchQueue.main.async {
-                        self?.loadingIndicator.stopAnimating()
-                        self?.messages = detail.messages
-                        self?.formhash = detail.formhash ?? ""
-                        self?.tableView.reloadData()
-                        self?.scrollToBottom()
-                    }
-                } else {
-                    // Try GB18030 encoding for Chinese websites
-                    let gbEncoding = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(0x80000631)))
-                    if let data = html.data(using: gbEncoding) {
-                        let detail = try ForumHTMLParser.parsePMDetail(data)
-                        DispatchQueue.main.async {
-                            self?.loadingIndicator.stopAnimating()
-                            self?.messages = detail.messages
-                            self?.formhash = detail.formhash ?? ""
-                            self?.tableView.reloadData()
-                            self?.scrollToBottom()
-                        }
-                    }
+                let detail = try await NetworkManager.shared.fetchPMDetail(uid: self.uid)
+                await MainActor.run {
+                    self.loadingIndicator.stopAnimating()
+                    print("[PMDetail] Loaded \(detail.messages.count) messages")
+                    self.messages = detail.messages
+                    self.formhash = detail.formhash ?? ""
+                    self.tableView.reloadData()
+                    self.scrollToBottom()
                 }
             } catch {
-                print("[PMDetail] Parse error: \(error)")
-                DispatchQueue.main.async {
-                    self?.loadingIndicator.stopAnimating()
+                await MainActor.run {
+                    self.loadingIndicator.stopAnimating()
+                    print("[PMDetail] Failed to load: \(error.localizedDescription)")
                 }
             }
         }
@@ -203,8 +155,6 @@ class PMDetailViewController: UIViewController {
     }
 
     @objc private func sendTapped() {
-        guard webView != nil else { return }
-
         guard let message = replyTextView.text, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
@@ -216,54 +166,22 @@ class PMDetailViewController: UIViewController {
 
         sendButton.isEnabled = false
 
-        sendReplyViaWebView(message: message)
-    }
-
-    private func sendReplyViaWebView(message: String) {
-        guard let webView = webView else {
-            sendButton.isEnabled = true
-            return
-        }
-
-        // Escape message for JavaScript
-        let escapedMessage = message
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-
-        let js = """
-        (function() {
-            var textarea = document.querySelector('#pmreplymessage') || document.querySelector('textarea[name="message"]');
-            if (!textarea) {
-                return {success: false, error: 'no_textarea'};
-            }
-            textarea.value = '\(escapedMessage)';
-
-            var form = document.querySelector('#pmform') || document.querySelector('form');
-            if (form) {
-                form.submit();
-                return {success: true};
-            }
-            return {success: false, error: 'no_form'};
-        })();
-        """
-
-        webView.evaluateJavaScript(js) { [weak self] result, error in
-            if let error = error {
-                print("[PMDetail] Send JS error: \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    self?.sendButton.isEnabled = true
-                    self?.showAlert(title: "错误", message: "发送失败: \(error.localizedDescription)")
+        // 原生发送。WebView 页面根本加载不出来（被 Cloudflare 拦），
+        // 之前靠 JS form.submit() 发私信在真机上不可用。
+        Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                _ = try await NetworkManager.shared.sendPM(uid: self.uid, message: message, formhash: self.formhash)
+                await MainActor.run {
+                    self.replyTextView.text = ""
+                    self.sendButton.isEnabled = true
+                    self.loadPMDetail()
                 }
-                return
-            }
-
-            // Wait for message to be sent, then reload
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.replyTextView.text = ""
-                self?.sendButton.isEnabled = true
-                self?.loadPMDetail()
+            } catch {
+                await MainActor.run {
+                    self.sendButton.isEnabled = true
+                    self.showAlert(title: "错误", message: "发送失败: \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -309,27 +227,6 @@ extension PMDetailViewController: UITextViewDelegate {
         let size = textView.sizeThatFits(CGSize(width: textView.bounds.width, height: .greatestFiniteMagnitude))
         if size.height != textView.bounds.height {
             textView.isScrollEnabled = size.height > 100
-        }
-    }
-}
-
-// MARK: - WKNavigationDelegate
-
-extension PMDetailViewController: WKNavigationDelegate {
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        let urlString = webView.url?.absoluteString ?? ""
-        print("[PMDetail] Page loaded: \(urlString)")
-
-        // Extract content after page finishes loading
-        extractPMContent()
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
-        print("[PMDetail] Load failed: \(error.localizedDescription)")
-        DispatchQueue.main.async {
-            self.loadingIndicator.stopAnimating()
-            self.showAlert(title: "错误", message: "加载失败: \(error.localizedDescription)")
         }
     }
 }

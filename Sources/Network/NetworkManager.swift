@@ -698,6 +698,40 @@ class NetworkManager {
         }
     }
 
+    /// 原生发送私信。
+    /// 表单来自 pm.php 的回复框：action=pm.php?action=send&uid=X&pmsubmit=yes&infloat=yes
+    /// body 需含 formhash / handlekey=pmreply / lastdaterange / message，且按 GBK 编码。
+    func sendPM(uid: Int, message: String, formhash: String, lastDateRange: String = "") async throws -> Bool {
+        let url = URL(string: "https://www.4d4y.com/forum/pm.php?action=send&uid=\(uid)&pmsubmit=yes&infloat=yes&inajax=1")!
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://www.4d4y.com/forum/pm.php?uid=\(uid)&filter=privatepm&daterange=5", forHTTPHeaderField: "Referer")
+        request.setValue("https://www.4d4y.com", forHTTPHeaderField: "Origin")
+
+        let fields: [(String, String)] = [
+            ("formhash", formhash),
+            ("handlekey", "pmreply"),
+            ("lastdaterange", lastDateRange),
+            ("message", message)
+        ]
+        let body = fields.map { "\($0.0)=\(Self.gbkPercentEncoded($0.1))" }.joined(separator: "&")
+        request.httpBody = body.data(using: .ascii)
+
+        let (data, response) = try await send(request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw NetworkError.invalidResponse(statusCode: (response as? HTTPURLResponse)?.statusCode)
+        }
+
+        // Discuz inajax 返回里出现明确错误提示才算失败；成功一般是 succeedhandle / 空 root
+        let html = (try? decodeHTMLData(data)) ?? ""
+        if html.contains("请不要") || html.contains("错误") || html.contains("无权") {
+            throw NetworkError.loginFailed("发送失败")
+        }
+        return true
+    }
+
     // MARK: - User Profile
 
     func fetchUserProfile(uid: Int) async throws -> ForumUser {

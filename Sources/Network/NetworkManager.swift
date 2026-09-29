@@ -12,6 +12,7 @@ enum NetworkError: Error {
     case serverError(statusCode: Int)
     case notFound
     case unauthorized
+    case postFailed(String)
 
     var localizedDescription: String {
         switch self {
@@ -46,6 +47,8 @@ enum NetworkError: Error {
             return "请求的内容不存在"
         case .unauthorized:
             return "未授权，请重新登录"
+        case .postFailed(let detail):
+            return detail
         }
     }
 
@@ -564,64 +567,211 @@ class NetworkManager {
 
     // MARK: - Reply
 
-    func replyThread(tid: Int, message: String, formhash: String) async throws -> Bool {
-        var components = URLComponents(url: baseURL.appendingPathComponent("post.php"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [
+    // MARK: - Posting (native)
+    //
+    // 发帖/回复/附件全部走原生 URLSession。之前是用 WKWebView 打开 post.php 取
+    // formhash 再 form.submit()，但 WKWebView 被 Cloudflare Turnstile 拦死（见
+    // CLAUDE.md），formhash 根本取不到，功能名存实亡。原生请求能过 Cloudflare，
+    // 表单结构已按真实页面核对：
+    //   - 回复:   post.php?action=reply&fid=&tid=&extra=&replysubmit=yes
+    //   - 发帖:   post.php?action=newthread&fid=&extra=&topicsubmit=yes
+    //   - 传图:   misc.php?action=swfupload&operation=upload&simple=1&type=image
+    //             (multipart: uid / hash / Filedata)，返回纯 aid
+    // 提交表单一律按 GBK 逐字节百分号编码，否则中文标题/正文乱码。
+
+    /// 发帖/回复页解析出的表单信息
+    struct PostFormInfo {
+        let fid: Int
+        let tid: Int
+        let formhash: String
+        let posttime: String
+        let uploadHash: String?   // 传图用的 hash，未登录/无附件权限时可能为空
+    }
+
+    /// 取回复页表单（formhash / posttime / 上传 hash / fid）
+    func fetchReplyForm(tid: Int) async throws -> PostFormInfo {
+        var request = URLRequest(url: URL(string: "https://www.4d4y.com/forum/post.php?action=reply&tid=\(tid)")!)
+        request.setValue("https://www.4d4y.com/forum/viewthread.php?tid=\(tid)", forHTTPHeaderField: "Referer")
+        let (data, response) = try await send(request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw NetworkError.invalidResponse(statusCode: (response as? HTTPURLResponse)?.statusCode)
+        }
+        let html = try decodeHTMLData(data)
+        return try parsePostForm(html: html, fallbackTid: tid, fallbackFid: 0)
+    }
+
+    /// 取发帖页表单
+    func fetchNewThreadForm(fid: Int) async throws -> PostFormInfo {
+        var request = URLRequest(url: URL(string: "https://www.4d4y.com/forum/post.php?action=newthread&fid=\(fid)")!)
+        request.setValue("https://www.4d4y.com/forum/forumdisplay.php?fid=\(fid)", forHTTPHeaderField: "Referer")
+        let (data, response) = try await send(request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw NetworkError.invalidResponse(statusCode: (response as? HTTPURLResponse)?.statusCode)
+        }
+        let html = try decodeHTMLData(data)
+        return try parsePostForm(html: html, fallbackTid: 0, fallbackFid: fid)
+    }
+
+    private func parsePostForm(html: String, fallbackTid: Int, fallbackFid: Int) throws -> PostFormInfo {
+        // formhash 可能是隐藏 input，也可能只出现在链接的 ?formhash= 上
+        let formhash = Self.firstMatch(#"name="formhash"\s+value="([^"]+)""#, in: html)
+            ?? Self.firstMatch(#"formhash=([0-9a-fA-F]{6,})"#, in: html)
+        guard let fh = formhash, !fh.isEmpty else {
+            if html.contains("logging.php?action=login") || html.contains("您还没有登录") || html.contains("请先登录") {
+                throw NetworkError.postFailed("请先登录后再操作")
+            }
+            throw NetworkError.postFailed("无法获取发帖表单，请稍后重试")
+        }
+        let posttime = Self.firstMatch(#"name="posttime"\s+value="(\d+)""#, in: html)
+            ?? String(Int(Date().timeIntervalSince1970))
+        let uploadHash = Self.firstMatch(#"name="hash"\s+value="([0-9a-fA-F]+)""#, in: html)
+        let fid = Self.firstMatch(#"post\.php\?action=[a-z]+&(?:amp;)?fid=(\d+)"#, in: html).flatMap { Int($0) }
+            ?? Self.firstMatch(#"[?&]fid=(\d+)"#, in: html).flatMap { Int($0) }
+            ?? fallbackFid
+        let tid = Self.firstMatch(#"[?&]tid=(\d+)"#, in: html).flatMap { Int($0) } ?? fallbackTid
+        return PostFormInfo(fid: fid, tid: tid, formhash: fh, posttime: posttime, uploadHash: uploadHash)
+    }
+
+    /// 原生上传单张附件，返回附件 aid。上传成功后 Discuz 会把该附件挂在
+    /// 当前用户本次会话（uid + hash）的待处理列表里，发帖/回复提交时自动关联。
+    func uploadAttachment(imageData: Data, uid: Int, uploadHash: String, referer: String) async throws -> String {
+        let url = URL(string: "https://www.4d4y.com/forum/misc.php?action=swfupload&operation=upload&simple=1&type=image")!
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(referer, forHTTPHeaderField: "Referer")
+        request.timeoutInterval = 60
+
+        var body = Data()
+        func addField(_ name: String, _ value: String) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+        addField("uid", String(uid))
+        addField("hash", uploadHash)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"Filedata\"; filename=\"image.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (data, response) = try await send(request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw NetworkError.postFailed("图片上传失败 (HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1))")
+        }
+        let text = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // simple=1 一般直接返回 aid；兜底取响应里的第一串数字
+        if text.range(of: #"^\d+$"#, options: .regularExpression) != nil { return text }
+        if let aid = Self.firstMatch(#"(\d+)"#, in: text), !aid.isEmpty { return aid }
+        throw NetworkError.postFailed("图片上传失败：\(text.prefix(60))")
+    }
+
+    /// 原生回复。attachAids 为已上传附件 id，会以 [attachimg] 形式插入正文末尾以内联显示。
+    func replyThread(tid: Int, fid: Int, message: String, formhash: String, posttime: String, attachAids: [String] = []) async throws -> Bool {
+        var comps = URLComponents(string: "https://www.4d4y.com/forum/post.php")!
+        comps.queryItems = [
             URLQueryItem(name: "action", value: "reply"),
             URLQueryItem(name: "tid", value: String(tid)),
-            URLQueryItem(name: "formhash", value: formhash),
-            URLQueryItem(name: "posttime", value: String(Int(Date().timeIntervalSince1970)))
+            URLQueryItem(name: "extra", value: ""),
+            URLQueryItem(name: "replysubmit", value: "yes")
         ]
+        if fid > 0 { comps.queryItems?.insert(URLQueryItem(name: "fid", value: String(fid)), at: 1) }
 
-        var request = URLRequest(url: components.url!)
+        var request = URLRequest(url: comps.url!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://www.4d4y.com/forum/post.php?action=reply&tid=\(tid)", forHTTPHeaderField: "Referer")
+        request.setValue("https://www.4d4y.com", forHTTPHeaderField: "Origin")
 
-        let bodyItems: [URLQueryItem] = [
-            URLQueryItem(name: "message", value: message),
-            URLQueryItem(name: "formhash", value: formhash)
+        let fields: [(String, String)] = [
+            ("formhash", formhash),
+            ("posttime", posttime),
+            ("wysiwyg", "0"),
+            ("subject", ""),
+            ("message", Self.appendAttachTags(message, aids: attachAids)),
+            ("usesig", "1")
         ]
-        let bodyString = bodyItems.map { "\($0.name)=\($0.value?.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")" }.joined(separator: "&")
-        request.httpBody = bodyString.data(using: .utf8)
-
-        let (_, response) = try await send(request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw NetworkError.invalidResponse(statusCode: nil)
-        }
-
-        return httpResponse.statusCode == 200 || httpResponse.statusCode == 302
+        request.httpBody = fields.map { "\($0.0)=\(Self.gbkPercentEncoded($0.1))" }.joined(separator: "&").data(using: .ascii)
+        return try await submitPostAndCheck(request)
     }
 
     // MARK: - Create Thread
 
-    func createThread(fid: Int, title: String, message: String, formhash: String) async throws -> Bool {
-        var components = URLComponents(url: baseURL.appendingPathComponent("post.php"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [
+    /// 原生发帖。
+    func createThread(fid: Int, title: String, message: String, typeid: Int, tags: String, formhash: String, posttime: String, attachAids: [String] = []) async throws -> Bool {
+        var comps = URLComponents(string: "https://www.4d4y.com/forum/post.php")!
+        comps.queryItems = [
             URLQueryItem(name: "action", value: "newthread"),
             URLQueryItem(name: "fid", value: String(fid)),
-            URLQueryItem(name: "formhash", value: formhash)
+            URLQueryItem(name: "extra", value: ""),
+            URLQueryItem(name: "topicsubmit", value: "yes")
         ]
 
-        var request = URLRequest(url: components.url!)
+        var request = URLRequest(url: comps.url!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://www.4d4y.com/forum/post.php?action=newthread&fid=\(fid)", forHTTPHeaderField: "Referer")
+        request.setValue("https://www.4d4y.com", forHTTPHeaderField: "Origin")
 
-        let bodyItems: [URLQueryItem] = [
-            URLQueryItem(name: "subject", value: title),
-            URLQueryItem(name: "message", value: message),
-            URLQueryItem(name: "formhash", value: formhash)
+        var fields: [(String, String)] = [
+            ("formhash", formhash),
+            ("posttime", posttime),
+            ("wysiwyg", "0"),
+            ("subject", title),
+            ("message", Self.appendAttachTags(message, aids: attachAids)),
+            ("usesig", "1")
         ]
-        let bodyString = bodyItems.map { "\($0.name)=\($0.value?.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")" }.joined(separator: "&")
-        request.httpBody = bodyString.data(using: .utf8)
+        if typeid > 0 { fields.insert(("typeid", String(typeid)), at: 3) }
+        if !tags.isEmpty { fields.append(("tags", tags)) }
+        request.httpBody = fields.map { "\($0.0)=\(Self.gbkPercentEncoded($0.1))" }.joined(separator: "&").data(using: .ascii)
+        return try await submitPostAndCheck(request)
+    }
 
-        let (_, response) = try await send(request)
+    private static func appendAttachTags(_ message: String, aids: [String]) -> String {
+        guard !aids.isEmpty else { return message }
+        return message + "\n" + aids.map { "[attachimg]\($0)[/attachimg]" }.joined(separator: "\n")
+    }
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw NetworkError.invalidResponse(statusCode: nil)
+    /// 提交发帖/回复并判定结果。成功时 Discuz 会跳转到 viewthread（ASCII 可靠可判）；
+    /// 否则尽量从返回页里认出中文错误提示，实在认不出给个通用失败。
+    private func submitPostAndCheck(_ request: URLRequest) async throws -> Bool {
+        let (data, response) = try await send(request)
+        let finalURL = response.url?.absoluteString ?? ""
+        let html = (try? decodeHTMLData(data)) ?? ""
+
+        if finalURL.contains("viewthread.php") || html.contains("viewthread.php?tid=") || html.contains("resultmessage") && html.contains("success") {
+            return true
         }
 
-        return httpResponse.statusCode == 200 || httpResponse.statusCode == 302
+        let errorKeywords: [(String, String)] = [
+            ("两次发表", "发帖过于频繁，请稍后再试"),
+            ("间隔", "发帖过于频繁，请稍后再试"),
+            ("验证码", "该操作需要验证码，暂不支持"),
+            ("无权", "没有权限在该板块发帖/回复"),
+            ("权限", "没有权限在该板块发帖/回复"),
+            ("标题不能为空", "标题不能为空"),
+            ("内容不能为空", "内容不能为空"),
+            ("字数", "内容长度不符合要求"),
+            ("登录", "登录状态已失效，请重新登录"),
+            ("抱歉", "发帖失败，请稍后重试")
+        ]
+        for (kw, msg) in errorKeywords where html.contains(kw) {
+            throw NetworkError.postFailed(msg)
+        }
+        throw NetworkError.postFailed("发帖结果未确认，请回到帖子检查是否已发出")
+    }
+
+    /// 取正则第一个捕获组
+    static func firstMatch(_ pattern: String, in text: String) -> String? {
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators, .caseInsensitive]) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let m = re.firstMatch(in: text, range: range), m.numberOfRanges > 1,
+              let r = Range(m.range(at: 1), in: text) else { return nil }
+        return String(text[r])
     }
 
     // MARK: - Logout

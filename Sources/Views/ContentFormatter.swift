@@ -16,7 +16,14 @@ class ContentFormatter {
         var paragraphSpacing: CGFloat = 12
     }
 
-    static var `default` = Style()
+    /// 计算属性：每次读取都反映用户在设置里调整的字体大小与行距。
+    /// 因此修改设置后无需替换这里，只要 ReadingSettings.notifyChange() 清掉缓存即可。
+    static var `default`: Style {
+        var style = Style()
+        style.font = .systemFont(ofSize: ReadingSettings.shared.fontSize)
+        style.lineSpacing = ReadingSettings.shared.lineSpacing
+        return style
+    }
 
     // MARK: - Caching & Precompiled Regex
 
@@ -126,6 +133,19 @@ class ContentFormatter {
             // Add line break if not the last line
             if index < lines.count - 1 {
                 result.append(NSAttributedString(string: "\n"))
+            }
+        }
+
+        // 应用行距。style.lineSpacing 原先在 Style 里有定义却从未被用到，
+        // 这里统一补上：遍历已有的 paragraphStyle（空行 spacer 带着 paragraphSpacing），
+        // 在其副本上叠加 lineSpacing，避免覆盖空行间距；没有段落样式的正文行则新建一个。
+        if style.lineSpacing > 0 {
+            let fullRange = NSRange(location: 0, length: result.length)
+            result.enumerateAttribute(.paragraphStyle, in: fullRange, options: []) { value, range, _ in
+                let paragraphStyle = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle
+                    ?? NSMutableParagraphStyle()
+                paragraphStyle.lineSpacing = style.lineSpacing
+                result.addAttribute(.paragraphStyle, value: paragraphStyle, range: range)
             }
         }
 

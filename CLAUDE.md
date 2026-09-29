@@ -87,12 +87,26 @@ xcodebuild -project FourD4Y.xcodeproj -scheme FourD4Y -configuration Debug build
 - UA 必须全局一致（`WebClientConfig.userAgent`），POST 表单必须按 **GBK** 逐字节
   百分号编码，否则中文用户名/安全提问答案会乱码
 
-### 发帖/回复提交流程
-- 目前仍通过 WKWebView 执行 JavaScript 提交
-- ⚠️ 原先记录的理由（"Cookie 需要从 WKWebView 同步到服务器"）已被推翻，见上一节。
-  鉴于 WebView 现在反而是被 Cloudflare 拦的那条路，发帖/回复**大概率也应改为原生提交**，
-  只是尚未验证
-- 表单字段从页面 HTML 提取 (formhash, posttime, typeid 等)
+### 发帖/回复/附件提交流程（已全部原生化）
+- **已改为原生**（URLSession），旧的 WKWebView + `form.submit()` 方案已废弃：WebView 被
+  Cloudflare Turnstile 拦死，formhash 根本取不到，发帖/回复名存实亡，图片也因 uploadHash
+  拿不到而永远走"纯文本发帖"分支。
+- 表单结构已对着真实登录后的页面核对（`NetworkManager` 里有注释）：
+  - 取表单：GET `post.php?action=reply&tid=` / `post.php?action=newthread&fid=`，
+    正则解析 `formhash`（可能是隐藏 input，也可能只出现在链接的 `?formhash=`）、
+    `posttime`、上传用的 `hash`（`name="hash"`）、`fid`。
+  - 回复提交：POST `post.php?action=reply&fid=&tid=&extra=&replysubmit=yes`
+  - 发帖提交：POST `post.php?action=newthread&fid=&extra=&topicsubmit=yes`
+  - body 字段：`formhash / posttime / wysiwyg=0 / subject / message`（发帖另加 `typeid / tags`），
+    **必须按 GBK 逐字节百分号编码**（`gbkPercentEncoded`），否则中文乱码。
+  - 成功判定：Discuz 成功后跳转 `viewthread.php`（ASCII 可靠）；否则尽量认中文错误提示。
+- 图片附件：`misc.php?action=swfupload&operation=upload&simple=1&type=image`，
+  multipart 带 `uid / hash / Filedata`，返回纯 `aid`。上传成功后附件挂在
+  (uid, hash) 会话待处理列表里，提交发帖/回复时自动关联；正文追加
+  `[attachimg]aid[/attachimg]` 控制内联显示位置。
+- 排障提示：命令行 `swift` 脚本的 URLSession 同样能过 Cloudflare（Apple TLS 指纹），
+  可用来只读抓取真实页面核对表单；但**不要手动设 `Accept-Encoding`**——一旦手设，
+  URLSession 就不再自动解压，CF 强制返回的 brotli 得自己解。App 内不设该头，自动解压正常。
 
 ## 论坛 URL
 

@@ -10,6 +10,7 @@
 		00349D18A57CBE3FD2448840 /* SearchViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A55D7DCDAB9138844813DB27 /* SearchViewController.swift */; };
 		005FCB444EFCC9B96D4A30AA /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0C2EC97B9E5546E928C888 /* AppDelegate.swift */; };
 		05249118C098B3B474B06A7A /* ForumCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D084ECCF842EF73AAC9F57 /* ForumCell.swift */; };
+		0C9CE872CE4F3E343520CE98 /* SettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 559C6E3BE8C46C73F65792A4 /* SettingsViewController.swift */; };
 		0D831A59F2BF09458CE16A88 /* FavoriteManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4205AF5D1C48BA107461A18 /* FavoriteManager.swift */; };
 		13C7CFD21976890D9A6B9743 /* CloudflareManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22ABC244964B615F2F59BCBE /* CloudflareManager.swift */; };
 		1B07BDB4498FA7E9EA5F1BFA /* SearchResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 622EE2FD6A45D6B7D875C0C0 /* SearchResult.swift */; };
@@ -35,6 +36,7 @@
 		8CBA66107762D73AF90C8536 /* ForumHTMLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 016808113E826901F8EC7285 /* ForumHTMLParser.swift */; };
 		908CCC217A0733C6B424C049 /* HomeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BF8454FB583F3F9B5C20714 /* HomeViewController.swift */; };
 		9390E7526C27FA9C42FE6581 /* ExploreViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FEEE8D92AFE08A2806D7F3E /* ExploreViewController.swift */; };
+		9BEBD96CF5846BF7E290A274 /* ReadingSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81B40A135F60D61D9677A729 /* ReadingSettings.swift */; };
 		A3CB15AEDA5C22AE00593B72 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BE5686C50C4933295D1948C8 /* Assets.xcassets */; };
 		A98B99F8F7F809675EAF139D /* PMDetailViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70AF0941E6666A358602A9E /* PMDetailViewController.swift */; };
 		B4F209B7654FDA8B40645EE6 /* ThreadCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDC1FAEBAF26E1B615F46F93 /* ThreadCell.swift */; };
@@ -68,6 +70,7 @@
 		3E8E4D21650AA82AAF6C993F /* WebClientConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebClientConfig.swift; sourceTree = "<group>"; };
 		41CD17CFFAC7E6492BD159CB /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		47D47D8F57C0573B16193B46 /* NewThreadViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewThreadViewController.swift; sourceTree = "<group>"; };
+		559C6E3BE8C46C73F65792A4 /* SettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewController.swift; sourceTree = "<group>"; };
 		55D084ECCF842EF73AAC9F57 /* ForumCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumCell.swift; sourceTree = "<group>"; };
 		5B14E7A348460502FB37529B /* ImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageLoader.swift; sourceTree = "<group>"; };
 		622EE2FD6A45D6B7D875C0C0 /* SearchResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResult.swift; sourceTree = "<group>"; };
@@ -78,6 +81,7 @@
 		738188AF8F87372F35186957 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		7C1312867DB1D250DE92ECB1 /* ThreadListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadListViewController.swift; sourceTree = "<group>"; };
 		7D39365F725FA9B36F8882E8 /* LoginManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginManager.swift; sourceTree = "<group>"; };
+		81B40A135F60D61D9677A729 /* ReadingSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSettings.swift; sourceTree = "<group>"; };
 		876BD4DC5C6B9997150693B6 /* ReadTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadTracker.swift; sourceTree = "<group>"; };
 		8AA2C67B0B633380464FDF4C /* FavoriteThread.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoriteThread.swift; sourceTree = "<group>"; };
 		9169EBFFC84A31F561A208AB /* ForumThread.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumThread.swift; sourceTree = "<group>"; };
@@ -208,6 +212,7 @@
 				D4205AF5D1C48BA107461A18 /* FavoriteManager.swift */,
 				5B14E7A348460502FB37529B /* ImageLoader.swift */,
 				A92B1E4ADCC95E1FD6666E83 /* KeychainManager.swift */,
+				81B40A135F60D61D9677A729 /* ReadingSettings.swift */,
 				876BD4DC5C6B9997150693B6 /* ReadTracker.swift */,
 			);
 			path = Managers;
@@ -236,6 +241,7 @@
 				E5FE5DD5398AFE7DCFC26BA6 /* ProfileViewController.swift */,
 				693090A9275A6458CD96E8C8 /* ReplyViewController.swift */,
 				A55D7DCDAB9138844813DB27 /* SearchViewController.swift */,
+				559C6E3BE8C46C73F65792A4 /* SettingsViewController.swift */,
 				343D98C7E4BFBABEF73D1022 /* ThreadDetailViewController.swift */,
 				7C1312867DB1D250DE92ECB1 /* ThreadListViewController.swift */,
 			);
@@ -276,7 +282,7 @@
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					1807F133DE0E0BDCC8505061 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 92RNYY6JLW;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -354,10 +360,12 @@
 				2AFCEAA71B76A799A4A436ED /* PrivateMessage.swift in Sources */,
 				E8711FBC3FBDB5D9073ACAB4 /* ProfileViewController.swift in Sources */,
 				38BD3CB0DE7EB43ED724277F /* ReadTracker.swift in Sources */,
+				9BEBD96CF5846BF7E290A274 /* ReadingSettings.swift in Sources */,
 				88059AB3F70C51288A4F9D17 /* ReplyViewController.swift in Sources */,
 				4C7D2B8F6FA4AFC9ADBB52E4 /* SceneDelegate.swift in Sources */,
 				1B07BDB4498FA7E9EA5F1BFA /* SearchResult.swift in Sources */,
 				00349D18A57CBE3FD2448840 /* SearchViewController.swift in Sources */,
+				0C9CE872CE4F3E343520CE98 /* SettingsViewController.swift in Sources */,
 				BCFAFBA7E8145E2154D4D964 /* Theme.swift in Sources */,
 				B4F209B7654FDA8B40645EE6 /* ThreadCell.swift in Sources */,
 				89EBE3A41924D5E0D4DC90B1 /* ThreadDetail.swift in Sources */,
@@ -408,7 +416,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 92RNYY6JLW;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -511,7 +519,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 92RNYY6JLW;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;

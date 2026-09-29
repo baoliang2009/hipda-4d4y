@@ -1,39 +1,47 @@
 import UIKit
-import WebKit
+import PhotosUI
 
 protocol ReplyViewControllerDelegate: AnyObject {
     func replyViewControllerDidPost(_ controller: ReplyViewController)
     func replyViewControllerDidCancel(_ controller: ReplyViewController)
 }
 
+/// 回复帖子。
+///
+/// 已从 WKWebView 方案改为原生：加载回复页表单、提交、上传附件全部走 URLSession。
+/// 旧方案靠隐藏 WKWebView 打开 post.php 取 formhash 再 form.submit()，但 WKWebView
+/// 会被 Cloudflare Turnstile 拦死（见 CLAUDE.md），formhash 取不到、回复根本发不出去，
+/// 而且原来完全没有附件功能。现在两者都补上。
 class ReplyViewController: UIViewController {
 
     weak var delegate: ReplyViewControllerDelegate?
 
     private let tid: Int
-    private let reppost: Int?  // The post ID being replied to (for quote-reply)
+    private let reppost: Int?  // 被回复的楼层（仅用于标题展示）
     private let scrollView = UIScrollView()
     private let contentView = UIView()
-    private let headerLabel = UILabel()  // Shows "回复楼主" or "回复 #X楼"
+    private let headerLabel = UILabel()
     private let contentTextView = UITextView()
+    private let attachmentButton = UIButton(type: .system)
+    private let attachmentCollectionView: UICollectionView
     private let submitButton = UIButton(type: .system)
     private let loadingIndicator = UIActivityIndicatorView(style: .medium)
 
-    private var webView: WKWebView?
-    private var formhash: String?
+    private var formInfo: NetworkManager.PostFormInfo?
+    private var selectedImages: [UIImage] = []
     private var isSubmitting = false
 
-    /// Initialize for a new thread reply
     init(tid: Int) {
         self.tid = tid
         self.reppost = nil
+        self.attachmentCollectionView = ReplyViewController.makeAttachmentCollectionView()
         super.init(nibName: nil, bundle: nil)
     }
 
-    /// Initialize for replying to a specific post
     init(tid: Int, reppost: Int) {
         self.tid = tid
         self.reppost = reppost
+        self.attachmentCollectionView = ReplyViewController.makeAttachmentCollectionView()
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -41,10 +49,19 @@ class ReplyViewController: UIViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    private static func makeAttachmentCollectionView() -> UICollectionView {
+        let layout = UICollectionViewFlowLayout()
+        layout.scrollDirection = .horizontal
+        layout.itemSize = CGSize(width: 80, height: 80)
+        layout.minimumInteritemSpacing = 8
+        layout.sectionInset = UIEdgeInsets(top: 0, left: 20, bottom: 0, right: 20)
+        return UICollectionView(frame: .zero, collectionViewLayout: layout)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
-        loadReplyPage()
+        loadReplyForm()
     }
 
     private func setupUI() {
@@ -79,23 +96,17 @@ class ReplyViewController: UIViewController {
 
         setupHeaderLabel()
         setupContentField()
+        setupAttachmentSection()
         setupSubmitButton()
-        setupLoadingIndicator()
     }
 
     private func setupHeaderLabel() {
         headerLabel.font = .systemFont(ofSize: 14, weight: .medium)
         headerLabel.textColor = Theme.secondaryText
-
-        if let reppost = reppost {
-            headerLabel.text = "回复 #\(reppost) 楼"
-        } else {
-            headerLabel.text = "回复楼主"
-        }
+        headerLabel.text = reppost != nil ? "回复 #\(reppost!) 楼" : "回复楼主"
 
         contentView.addSubview(headerLabel)
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
-
         NSLayoutConstraint.activate([
             headerLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
             headerLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
@@ -122,7 +133,6 @@ class ReplyViewController: UIViewController {
 
         label.translatesAutoresizingMaskIntoConstraints = false
         contentTextView.translatesAutoresizingMaskIntoConstraints = false
-
         NSLayoutConstraint.activate([
             label.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 16),
             label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
@@ -135,6 +145,44 @@ class ReplyViewController: UIViewController {
         ])
     }
 
+    private func setupAttachmentSection() {
+        let label = UILabel()
+        label.text = "附件图片"
+        label.font = .systemFont(ofSize: 14, weight: .medium)
+        label.textColor = Theme.secondaryText
+
+        attachmentButton.setTitle("+ 添加图片", for: .normal)
+        attachmentButton.setTitleColor(Theme.primary, for: .normal)
+        attachmentButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
+        attachmentButton.addTarget(self, action: #selector(addAttachmentTapped), for: .touchUpInside)
+
+        attachmentCollectionView.backgroundColor = .clear
+        attachmentCollectionView.register(AttachmentCell.self, forCellWithReuseIdentifier: "AttachmentCell")
+        attachmentCollectionView.dataSource = self
+        attachmentCollectionView.delegate = self
+        attachmentCollectionView.isHidden = true
+
+        contentView.addSubview(label)
+        contentView.addSubview(attachmentButton)
+        contentView.addSubview(attachmentCollectionView)
+
+        label.translatesAutoresizingMaskIntoConstraints = false
+        attachmentButton.translatesAutoresizingMaskIntoConstraints = false
+        attachmentCollectionView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: contentTextView.bottomAnchor, constant: 20),
+            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+
+            attachmentButton.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            attachmentButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+
+            attachmentCollectionView.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 8),
+            attachmentCollectionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            attachmentCollectionView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            attachmentCollectionView.heightAnchor.constraint(equalToConstant: 88)
+        ])
+    }
+
     private func setupSubmitButton() {
         submitButton.setTitle("提交回复", for: .normal)
         submitButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
@@ -143,52 +191,38 @@ class ReplyViewController: UIViewController {
         submitButton.layer.cornerRadius = 8
         submitButton.addTarget(self, action: #selector(submitTapped), for: .touchUpInside)
 
+        loadingIndicator.color = .white
+        loadingIndicator.hidesWhenStopped = true
+
         contentView.addSubview(submitButton)
+        submitButton.addSubview(loadingIndicator)
 
         submitButton.translatesAutoresizingMaskIntoConstraints = false
-
+        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            submitButton.topAnchor.constraint(equalTo: contentTextView.bottomAnchor, constant: 20),
+            submitButton.topAnchor.constraint(equalTo: attachmentCollectionView.bottomAnchor, constant: 24),
             submitButton.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             submitButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
             submitButton.heightAnchor.constraint(equalToConstant: 50),
-            submitButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20)
-        ])
-    }
+            submitButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
 
-    private func setupLoadingIndicator() {
-        loadingIndicator.color = .white
-        loadingIndicator.hidesWhenStopped = true
-        submitButton.addSubview(loadingIndicator)
-
-        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
             loadingIndicator.centerXAnchor.constraint(equalTo: submitButton.centerXAnchor),
             loadingIndicator.centerYAnchor.constraint(equalTo: submitButton.centerYAnchor)
         ])
     }
 
-    private func loadReplyPage() {
-        // Create hidden WKWebView to handle Cloudflare
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.customUserAgent = WebClientConfig.userAgent
-        webView.navigationDelegate = self
-        webView.isHidden = true
-        self.webView = webView
-        view.addSubview(webView)
-
-        // Build reply URL with reppost if specified
-        var replyURLString = "https://www.4d4y.com/forum/post.php?action=reply&tid=\(tid)"
-        if let reppost = reppost {
-            replyURLString += "&reppost=\(reppost)"
+    private func loadReplyForm() {
+        Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                let info = try await NetworkManager.shared.fetchReplyForm(tid: self.tid)
+                await MainActor.run { self.formInfo = info }
+            } catch {
+                await MainActor.run {
+                    self.showAlert(title: "提示", message: "加载回复表单失败：\(error.localizedDescription)")
+                }
+            }
         }
-
-        print("[Reply] Loading reply page: \(replyURLString)")
-        let replyURL = URL(string: replyURLString)!
-        webView.load(URLRequest(url: replyURL))
     }
 
     @objc private func cancelTapped() {
@@ -196,156 +230,87 @@ class ReplyViewController: UIViewController {
         dismiss(animated: true)
     }
 
+    @objc private func addAttachmentTapped() {
+        var config = PHPickerConfiguration()
+        config.selectionLimit = max(1, 5 - selectedImages.count)
+        config.filter = .images
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+
     @objc private func submitTapped() {
         guard !isSubmitting else { return }
 
-        guard let message = contentTextView.text, !message.isEmpty else {
+        let message = contentTextView.text ?? ""
+        guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedImages.isEmpty else {
             showAlert(title: "错误", message: "请输入回复内容")
             return
         }
-
-        guard let formhash = formhash else {
+        guard let info = formInfo else {
             showAlert(title: "提示", message: "正在加载表单数据，请稍后再试")
+            loadReplyForm()
             return
         }
 
-        isSubmitting = true
-        submitButton.setTitle("", for: .normal)
-        loadingIndicator.startAnimating()
+        setSubmitting(true)
 
-        submitReplyViaWebView(message: message, formhash: formhash)
-    }
-
-    private func submitReplyViaWebView(message: String, formhash: String) {
-        guard let webView = webView else {
-            isSubmitting = false
-            loadingIndicator.stopAnimating()
-            submitButton.setTitle("提交回复", for: .normal)
-            showAlert(title: "错误", message: "无法提交回复")
-            return
-        }
-
-        // Escape message for JavaScript
-        let escapedMessage = message
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-
-        let js = """
-        (function() {
-            var form = document.querySelector('form[name="reply"]') || document.querySelector('form');
-            if (!form) {
-                return {success: false, error: 'no_form'};
-            }
-
-            var messageField = form.querySelector('textarea[name="message"]') || form.querySelector('textarea');
-            if (messageField) {
-                messageField.value = '\(escapedMessage)';
-            }
-
-            // Submit form
-            form.submit();
-            return {success: true};
-        })();
-        """
-
-        webView.evaluateJavaScript(js) { [weak self] result, error in
-            if let error = error {
-                print("[Reply] JS error: \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    self?.isSubmitting = false
-                    self?.loadingIndicator.stopAnimating()
-                    self?.submitButton.setTitle("提交回复", for: .normal)
-                    self?.showAlert(title: "错误", message: "提交失败: \(error.localizedDescription)")
-                }
-                return
-            }
-
-            print("[Reply] Form submit JS executed successfully")
-        }
-
-        // Note: Rely on WKNavigationDelegate callbacks for result checking
-        // Only use a fallback timeout in case navigation doesn't happen
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-            guard let self = self, self.isSubmitting else { return }
-            print("[Reply] Fallback timeout reached, checking result...")
-            self.checkSubmitResult()
-        }
-    }
-
-    private func checkSubmitResult() {
-        guard let webView = webView else { return }
-
-        let url = webView.url?.absoluteString ?? ""
-        print("[Reply] Checking submit result, URL: \(url)")
-
-        // Success: navigated to viewthread page
-        if url.contains("viewthread.php") && url.contains("tid=\(tid)") {
-            print("[Reply] SUCCESS: Navigated to thread view")
-            handleSubmitSuccess()
-            return
-        }
-
-        // Check page content for success/error indicators
-        webView.evaluateJavaScript("document.body.innerText") { [weak self] result, error in
+        Task { [weak self] in
             guard let self = self else { return }
-
-            if let text = result as? String {
-                print("[Reply] Page text (first 200): \(String(text.prefix(200)))")
-
-                // Check for success indicators
-                let successIndicators = ["发帖成功", "回复成功", "succeed", "操作成功"]
-                for indicator in successIndicators {
-                    if text.contains(indicator) {
-                        print("[Reply] SUCCESS: Found indicator: \(indicator)")
-                        DispatchQueue.main.async {
-                            self.handleSubmitSuccess()
-                        }
-                        return
+            do {
+                let aids = try await self.uploadSelectedImages(info: info)
+                let ok = try await NetworkManager.shared.replyThread(
+                    tid: self.tid,
+                    fid: info.fid,
+                    message: message,
+                    formhash: info.formhash,
+                    posttime: info.posttime,
+                    attachAids: aids
+                )
+                await MainActor.run {
+                    self.setSubmitting(false)
+                    if ok {
+                        self.delegate?.replyViewControllerDidPost(self)
+                        self.dismiss(animated: true)
+                    } else {
+                        self.showAlert(title: "失败", message: "回复发送失败")
                     }
                 }
-
-                // Check for error indicators
-                let errorIndicators = ["错误", "失败", "error", "请登录", "验证码", "禁止", "不允许"]
-                for indicator in errorIndicators {
-                    if text.contains(indicator) {
-                        print("[Reply] ERROR: Found indicator: \(indicator)")
-                        DispatchQueue.main.async {
-                            self.handleSubmitError("回复失败: \(indicator)")
-                        }
-                        return
-                    }
-                }
-            }
-
-            // If URL changed from reply page, assume success
-            if !url.contains("post.php") && !url.contains("action=reply") {
-                print("[Reply] SUCCESS: URL changed from reply page")
-                DispatchQueue.main.async {
-                    self.handleSubmitSuccess()
-                }
-            } else {
-                print("[Reply] UNCERTAIN: Still on reply page or cannot determine")
-                DispatchQueue.main.async {
-                    self.handleSubmitError("无法确认回复是否成功，请手动检查")
+            } catch {
+                await MainActor.run {
+                    self.setSubmitting(false)
+                    self.showAlert(title: "错误", message: error.localizedDescription)
                 }
             }
         }
     }
 
-    private func handleSubmitSuccess() {
-        isSubmitting = false
-        loadingIndicator.stopAnimating()
-        delegate?.replyViewControllerDidPost(self)
-        dismiss(animated: true)
+    /// 逐张上传所选图片，返回附件 aid 列表。任一张失败即整体报错。
+    private func uploadSelectedImages(info: NetworkManager.PostFormInfo) async throws -> [String] {
+        guard !selectedImages.isEmpty else { return [] }
+        guard let uploadHash = info.uploadHash else {
+            throw NetworkError.postFailed("当前板块不支持上传附件")
+        }
+        let uid = LoginManager.shared.uid
+        guard uid > 0 else { throw NetworkError.postFailed("登录状态异常，无法上传图片") }
+
+        let referer = "https://www.4d4y.com/forum/post.php?action=reply&tid=\(tid)"
+        var aids: [String] = []
+        for image in selectedImages {
+            guard let data = image.jpegData(compressionQuality: 0.8) else { continue }
+            let aid = try await NetworkManager.shared.uploadAttachment(
+                imageData: data, uid: uid, uploadHash: uploadHash, referer: referer
+            )
+            aids.append(aid)
+        }
+        return aids
     }
 
-    private func handleSubmitError(_ message: String) {
-        isSubmitting = false
-        loadingIndicator.stopAnimating()
-        submitButton.setTitle("提交回复", for: .normal)
-        showAlert(title: "错误", message: message)
+    private func setSubmitting(_ submitting: Bool) {
+        isSubmitting = submitting
+        submitButton.setTitle(submitting ? "" : "提交回复", for: .normal)
+        submitButton.isEnabled = !submitting
+        if submitting { loadingIndicator.startAnimating() } else { loadingIndicator.stopAnimating() }
     }
 
     private func showAlert(title: String, message: String) {
@@ -355,64 +320,47 @@ class ReplyViewController: UIViewController {
     }
 }
 
-// MARK: - WKNavigationDelegate
+// MARK: - PHPickerViewControllerDelegate
 
-extension ReplyViewController: WKNavigationDelegate {
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        let urlString = webView.url?.absoluteString ?? ""
-        print("[Reply] Page loaded: \(urlString)")
-
-        // If submitting and reached thread view, it's success
-        if isSubmitting && urlString.contains("viewthread.php") && urlString.contains("tid=\(tid)") {
-            print("[Reply] SUCCESS: Thread view loaded after submit")
-            handleSubmitSuccess()
-            return
-        }
-
-        // If submitting, check for errors on current page
-        if isSubmitting {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.checkSubmitResult()
-            }
-            return
-        }
-
-        // Normal load - extract formhash from the page
-        webView.evaluateJavaScript("document.querySelector('input[name=formhash]')?.value") { [weak self] result, error in
-            guard let self = self else { return }
-
-            if let hash = result as? String, !hash.isEmpty {
-                print("[Reply] Found formhash: \(hash)")
-                self.formhash = hash
-            } else {
-                // Try to extract from HTML
-                webView.evaluateJavaScript("document.body.innerHTML") { [weak self] htmlResult, _ in
-                    guard let html = htmlResult as? String else { return }
-
-                    if let range = html.range(of: "formhash\" value=\"") {
-                        let startIndex = range.upperBound
-                        let endIndex = html.index(startIndex, offsetBy: 20, limitedBy: html.endIndex) ?? html.endIndex
-                        let substring = String(html[startIndex..<endIndex])
-                        if let hashEnd = substring.firstIndex(of: "\"") {
-                            let hash = String(substring[..<hashEnd])
-                            print("[Reply] Extracted formhash: \(hash)")
-                            self?.formhash = hash
-                        }
-                    }
+extension ReplyViewController: PHPickerViewControllerDelegate {
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true)
+        for result in results {
+            result.itemProvider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in
+                guard let image = object as? UIImage else { return }
+                DispatchQueue.main.async {
+                    guard let self = self, self.selectedImages.count < 5 else { return }
+                    self.selectedImages.append(image)
+                    self.updateAttachmentUI()
                 }
             }
         }
     }
 
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        print("[Reply] Navigation failed: \(error.localizedDescription)")
-        isSubmitting = false
-        loadingIndicator.stopAnimating()
-        submitButton.setTitle("提交回复", for: .normal)
+    private func updateAttachmentUI() {
+        attachmentCollectionView.isHidden = selectedImages.isEmpty
+        attachmentCollectionView.reloadData()
+        let full = selectedImages.count >= 5
+        attachmentButton.isEnabled = !full
+        attachmentButton.setTitle(full ? "已达上限" : "+ 添加图片", for: .normal)
+    }
+}
+
+// MARK: - UICollectionViewDataSource & Delegate
+
+extension ReplyViewController: UICollectionViewDataSource, UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        return selectedImages.count
     }
 
-    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        decisionHandler(.allow)
+    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "AttachmentCell", for: indexPath) as! AttachmentCell
+        cell.configure(with: selectedImages[indexPath.item])
+        cell.onDelete = { [weak self] in
+            guard let self = self, indexPath.item < self.selectedImages.count else { return }
+            self.selectedImages.remove(at: indexPath.item)
+            self.updateAttachmentUI()
+        }
+        return cell
     }
 }

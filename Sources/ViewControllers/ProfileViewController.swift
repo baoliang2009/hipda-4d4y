@@ -382,7 +382,7 @@ class ProfileViewController: UIViewController, LoginViewControllerDelegate {
             ("person.2.fill", "账号管理", #selector(accountManagementTapped)),
             ("bookmark", "我的收藏", nil),
             ("clock.arrow.circlepath", "浏览历史", nil),
-            ("gear", "设置", nil)
+            ("gear", "设置", #selector(settingsTapped))
         ]
 
         for (icon, title, action) in menuItems {
@@ -829,6 +829,11 @@ extension ProfileViewController: WKNavigationDelegate {
         accountSwitcherVC.delegate = self
         let navVC = UINavigationController(rootViewController: accountSwitcherVC)
         present(navVC, animated: true)
+    }
+
+    @objc private func settingsTapped() {
+        let settingsVC = SettingsViewController()
+        navigationController?.pushViewController(settingsVC, animated: true)
     }
 }
 

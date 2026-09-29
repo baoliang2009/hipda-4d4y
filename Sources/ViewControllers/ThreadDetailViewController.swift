@@ -30,6 +30,23 @@ class ThreadDetailViewController: UIViewController {
 
         // Mark thread as read
         ReadTracker.shared.markAsRead(tid: thread.tid)
+
+        // 阅读设置（字体/行距）变化时刷新：高度会随之改变，需清掉高度缓存再 reload
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(readingSettingsChanged),
+            name: ReadingSettings.didChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func readingSettingsChanged() {
+        heightCache.removeAll()
+        tableView.reloadData()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     private func setupUI() {
@@ -192,30 +209,6 @@ class ThreadDetailViewController: UIViewController {
         replyVC.delegate = self
         let navController = UINavigationController(rootViewController: replyVC)
         present(navController, animated: true)
-    }
-
-    private func submitReply(message: String, formhash: String) {
-        Task {
-            do {
-                let success = try await NetworkManager.shared.replyThread(
-                    tid: thread.tid,
-                    message: message,
-                    formhash: formhash
-                )
-                await MainActor.run {
-                    if success {
-                        self.showAlert(title: "成功", message: "回复已发送")
-                        self.refreshPosts()
-                    } else {
-                        self.showAlert(title: "失败", message: "回复发送失败")
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.showAlert(title: "错误", message: error.localizedDescription)
-                }
-            }
-        }
     }
 
     private func showLoginAlert() {
